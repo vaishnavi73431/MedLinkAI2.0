@@ -1,0 +1,309 @@
+
+/// <reference types="vite/client" />
+import OpenAI from 'openai';
+import { HabitTask, ChatMessage, HealthArticle } from '../types';
+
+// Initialize OpenAI Client
+// process.env.VITE_OPENAI_API_KEY will be populated by Vite's define or import.meta.env
+const apiKey = process.env.OPENAI_API_KEY || import.meta.env.VITE_OPENAI_API_KEY;
+
+const openai = new OpenAI({
+    apiKey: apiKey,
+    dangerouslyAllowBrowser: true // Required for client-side usage in Vite
+});
+
+const SYSTEM_INSTRUCTION = `
+You are "Sprout", a friendly, enthusiastic pixel-art gardening robot assistant AND a capable first-aid medical guide.
+Your primary goal is to help the user build healthy habits and answer health-related questions.
+
+Context:
+- The setting is a peaceful village town called "Homestead".
+- The user has come here to build good habits and stay healthy.
+- Homestead is a place of growth; as the user completes healthy habit tasks, they unlock new areas and buildings in the village (like the Power Pulse Gym, Zen Yoga Studio, and Camping Grounds).
+- You have access to a "Med Bay" where users can find doctors.
+- If the user describes symptoms, provide a friendly, non-alarmist potential analysis and suggest they visit the "Med Bay" to book a doctor if serious.
+- ALWAYS include a disclaimer for medical advice: "I'm a robot, not a doctor! Please see a professional."
+
+Mindfulness/Zen Breathing:
+- For "Zen Garden Breathing", the user has just finished 10 deep breaths.
+- Verify that the user looks calm or is in a focused environment. 
+- Reward them with high praise if they seem relaxed.
+
+Tone:
+- Encouraging, peaceful, cozy, and retro-game inspired.
+- Use emojis related to nature, cozy villages, health, and 8-bit games.
+`;
+
+const TRAINER_SYSTEM_INSTRUCTION = `
+You are "Coach Flex", a friendly, super-motivated, and supportive gym trainer bot. 
+You are the user's ultimate gym buddy.
+
+Mission:
+- Your primary mission is to ensure the user gets at least 30 minutes of physical exercise every single day.
+- Guide users to complete their daily healthy tasks in Homestead to stay in peak condition.
+- Offer practical fitness tips, workout routines, and encouragement.
+- IMPORTANT: If users need more specialized help, tell them they can click on the Gym Desk to find a list of professional personal trainers online!
+
+Personality:
+- Enthusiastic, high-energy, and friendly.
+- Use gym-related emojis frequently: 🏋️‍♂️, 💪, 🔥, 👟, ⚡.
+- Keep the user focused on the 30-minute daily goal. 
+- You are not just a trainer; you are a partner in their fitness journey.
+
+Context:
+- You are located in the Power Pulse Gym in Homestead.
+- Remind them that consistency is key!
+`;
+
+const NUTRITION_SYSTEM_INSTRUCTION = `
+You are "Bite-Sized", the Homestead Nutrition Bot. 
+Values:
+- Balance over restriction: A cookie won't kill you, but a whole box might make you regret your life choices for 10 minutes.
+- Consistency over perfection: Don't stress the occasional pizza; just make sure the next meal has a vegetable that didn't come from a frozen bag.
+- Fun over fear: Food is fuel, not a jump scare.
+Personality:
+- Friendly but slightly sarcastic.
+- Encouraging but realistic and informative.
+- Always remind users that for serious diet plans, they should click on the restaurant counter/desk to consult a real human dietician.
+
+Mission:
+- Analyze user meals (if they provide photos). 
+- RATE THE MEAL (e.g., 7/10, "Guilty Pleasure", "Green Machine").
+- Clearly state if it is Healthy or Not.
+- Identify specific components (sugar, trans fats, low fiber, excessive salt, etc.) that make it unhealthy OR ingredients (fiber, protein, vitamins) that make it great.
+- Provide a witty, balanced review. Don't be a food snob. 
+`;
+
+const DOCTOR_SYSTEM_INSTRUCTION = `
+You are "Dr. Triage", the Homestead Medical Guide. You are a "Caring Triage Guide". Your role is to listen, reassure, and guide users to the right specialist or help.
+
+Persona:
+- You are like a caring family doctor who listens first.
+- Your tone is human, gentle, and reassuring.
+
+Safety Guidelines (STRICT):
+- DO NOT diagnose conditions.
+- DO NOT prescribe medicines.
+- DO NOT suggest home remedies.
+- DO NOT replace real doctors.
+- ALWAYS say something like: "Only a qualified doctor can examine and diagnose properly."
+
+Allowed Actions:
+- Ask basic, non-diagnostic questions to understand the situation:
+  - Duration (How long has this been going on?)
+  - Severity (Mild, moderate, or severe?)
+  - Associated symptoms (Do you have fever, pain, or itching?)
+
+Mission:
+- Reassure the user.
+- Suggest what type of specialist they should consult based on their input (e.g., Dermatologist for skin issues, Cardiologist for chest concerns, etc.).
+- ALWAYS encourage users to use the teleconsultation service by clicking on the hospital's reception desk.
+`;
+
+export const chatWithSprout = async (history: ChatMessage[], message: string): Promise<string> => {
+    try {
+        const completion = await openai.chat.completions.create({
+            messages: [
+                { role: "system", content: SYSTEM_INSTRUCTION },
+                ...history.map(msg => ({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text } as any)).slice(-5), // Keep context small
+                { role: "user", content: message }
+            ],
+            model: "gpt-4o-mini",
+        });
+
+        return completion.choices[0].message.content || "I'm a bit tangled up in my vines! Try again?";
+    } catch (error) {
+        console.error("Chat Error:", error);
+        return "Sorry, my systems are acting up. 🤖";
+    }
+};
+
+export const chatWithTrainer = async (history: ChatMessage[], message: string): Promise<string> => {
+    try {
+        const completion = await openai.chat.completions.create({
+            messages: [
+                { role: "system", content: TRAINER_SYSTEM_INSTRUCTION },
+                ...history.map(msg => ({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text } as any)).slice(-5),
+                { role: "user", content: message }
+            ],
+            model: "gpt-4o-mini",
+        });
+        return completion.choices[0].message.content || "Keep moving!";
+    } catch (error) {
+        console.error("Trainer Chat Error:", error);
+        return "I'm out of breath! Give me a second.";
+    }
+};
+
+export const chatWithNutritionBot = async (history: ChatMessage[], message: string, imageBase64?: string): Promise<string> => {
+    try {
+        const messages: any[] = [
+            { role: "system", content: NUTRITION_SYSTEM_INSTRUCTION }
+        ];
+
+        if (imageBase64) {
+            messages.push({
+                role: "user",
+                content: [
+                    { type: "text", text: message },
+                    {
+                        type: "image_url",
+                        image_url: {
+                            url: imageBase64 // OpenAI accepts base64 data URLs directly
+                        }
+                    }
+                ]
+            });
+        } else {
+            messages.push({ role: "user", content: message });
+        }
+
+        const completion = await openai.chat.completions.create({
+            messages: messages,
+            model: "gpt-4o-mini", // Or gpt-4o for better vision
+        });
+        return completion.choices[0].message.content || "Looks like food to me.";
+    } catch (error) {
+        console.error("Nutrition Bot Error:", error);
+        return "My stomach hurts, try again later.";
+    }
+};
+
+export const chatWithDoctor = async (history: ChatMessage[], message: string): Promise<string> => {
+    try {
+        const completion = await openai.chat.completions.create({
+            messages: [
+                { role: "system", content: DOCTOR_SYSTEM_INSTRUCTION },
+                ...history.map(msg => ({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text } as any)).slice(-5),
+                { role: "user", content: message }
+            ],
+            model: "gpt-4o-mini",
+        });
+        return completion.choices[0].message.content || "I'm here to listen. Tell me more.";
+    } catch (error) {
+        console.error("Doctor Chat Error:", error);
+        return "I'm currently attending to an emergency. One moment.";
+    }
+};
+
+export const generateTasks = async (score: number, context: string): Promise<HabitTask[]> => {
+    try {
+        const completion = await openai.chat.completions.create({
+            messages: [
+                { role: "system", content: "You are a helpful assistant that generates JSON." },
+                {
+                    role: "user",
+                    content: `Generate 3 new health habit tasks based on this context: ${context}. Current progress score is ${score}. 
+          Return a JSON object with a key "tasks" containing an array of objects. 
+          Each object must have: id (string), title (string), description (string), points (integer), category (string: one of water, exercise, mindfulness, nutrition, sleep).`
+                }
+            ],
+            model: "gpt-4o-mini",
+            response_format: { type: "json_object" }
+        });
+
+        const content = completion.choices[0].message.content;
+        if (!content) return [];
+
+        const parsed = JSON.parse(content);
+        const tasks = parsed.tasks || [];
+
+        return tasks.map((t: any) => ({ ...t, completed: false }));
+    } catch (error) {
+        console.error("Generate Tasks Error:", error);
+        return [];
+    }
+};
+
+export const verifyTaskCompletion = async (taskTitle: string, imageBase64: string, isIoT: boolean): Promise<{ verified: boolean; message: string }> => {
+    try {
+        const completion = await openai.chat.completions.create({
+            messages: [
+                { role: "system", content: "You are a task verification assistant. Return JSON." },
+                {
+                    role: "user",
+                    content: [
+                        {
+                            type: "text", text: `Verify if the user appears to be performing or has completed the health task: "${taskTitle}". 
+                        
+                        CRITICAL INSTRUCTIONS:
+                        - For "Breathing", "Meditation", or "Zen" tasks: Verify if the user looks CALM, RELAXED, FOCUSED, or has EYES CLOSED. A static image cannot show breathing motion, so judge based on the user's PEACEFUL STATE. If they look relatively calm, mark as TRUE.
+                        - For Physical tasks (Yoga, Workout): Look for active poses or post-workout glow.
+                        - ${isIoT ? "IoT heart rate data confirms physical effort, so be more lenient with visual proof." : ""} 
+                        
+                        Return JSON with:
+                        - "verified": boolean
+                        - "message": short, encouraging feedback string` },
+                        {
+                            type: "image_url",
+                            image_url: {
+                                url: imageBase64
+                            }
+                        }
+                    ]
+                }
+            ],
+            model: "gpt-4o-mini",
+            response_format: { type: "json_object" }
+        });
+
+        const content = completion.choices[0].message.content || '{}';
+        return JSON.parse(content);
+    } catch (error) {
+        console.error("Verify Task Error:", error);
+        return { verified: false, message: "Verification failed due to a system error." };
+    }
+};
+
+export const generateSproutSpeech = async (text: string): Promise<string | undefined> => {
+    try {
+        const mp3 = await openai.audio.speech.create({
+            model: "tts-1",
+            voice: "nova",
+            input: `Say in a cheerful voice: ${text}`,
+        });
+
+        const buffer = Buffer.from(await mp3.arrayBuffer());
+        return "data:audio/mp3;base64," + buffer.toString('base64');
+    } catch (error) {
+        console.error("TTS generation error:", error);
+        return undefined;
+    }
+};
+
+// Fallback functions for Map/Search features (OpenAI doesn't support Google Maps/Search Tools natively)
+export const fetchGymsNearMe = async (lat: number, lng: number): Promise<HealthArticle[]> => {
+    // Return hardcoded/mock data since we lost Google Maps Grounding
+    return [
+        { title: "TUF Fitness Studio", url: "https://tusharummatfitness.com/", source: "Official Website", type: "article" },
+        { title: "Cult.fit - Fitness and Wellness", url: "https://www.cult.fit/", source: "Partner Studio", type: "article" },
+        { title: "Gold's Gym India", url: "https://goldsgym.in/", source: "Fitness Center", type: "article" },
+        { title: "Anytime Fitness", url: "https://www.anytimefitness.co.in/", source: "Global Chain", type: "article" }
+    ];
+};
+
+export const fetchHealthyRestaurants = async (lat: number, lng: number): Promise<HealthArticle[]> => {
+    // Return hardcoded/mock data since we lost Google Maps Grounding
+    return [
+        { title: "Eat.fit", url: "https://www.cult.fit/eat", source: "Eat.fit", type: "article" },
+        { title: "Subway", url: "https://www.subway.com", source: "Global Chain", type: "article" },
+        { title: "Salad Days", url: "https://saladdays.co/", source: "Fresh Salads", type: "article" }
+    ];
+};
+
+export const fetchLatestHealthContent = async (): Promise<HealthArticle[]> => {
+    // Return hardcoded/mock data since we lost Google Search Grounding
+    return [
+        { title: "WHO: Healthy Diet", url: "https://www.who.int/news-room/fact-sheets/detail/healthy-diet", source: "who.int", type: "article" },
+        { title: "CDC: Benefit of Physical Activity", url: "https://www.cdc.gov/physicalactivity/basics/pa-health/index.htm", source: "cdc.gov", type: "article" },
+        { title: "Mayo Clinic: Stress Management", url: "https://www.mayoclinic.org/healthy-lifestyle/stress-management", source: "mayoclinic.org", type: "article" }
+    ];
+};
+
+export const fetchLatestCampingContent = async (): Promise<HealthArticle[]> => {
+    // Return hardcoded/mock data since we lost Google Search Grounding
+    return [
+        { title: "Indiahikes", url: "https://indiahikes.com/", source: "Trekking", type: "article" },
+        { title: "Thrillophilia Camping", url: "https://www.thrillophilia.com/camping-in-india", source: "Booking", type: "article" }
+    ];
+};

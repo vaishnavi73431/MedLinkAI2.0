@@ -1,0 +1,10 @@
+{
+  "name": "tuski habit builder 6",
+  "description": "A gamified habit tracker where completing healthy tasks transforms a barren pixel-art wasteland into a lush garden, guided by a friendly AI bot.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "bluetooth",
+    "geolocation"
+  ]
+}
