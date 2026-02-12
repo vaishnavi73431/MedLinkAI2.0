@@ -5,7 +5,7 @@ import { HabitTask, ChatMessage, HealthArticle } from '../types';
 
 // Initialize OpenAI Client
 // process.env.VITE_OPENAI_API_KEY will be populated by Vite's define or import.meta.env
-const apiKey = process.env.OPENAI_API_KEY || import.meta.env.VITE_OPENAI_API_KEY;
+const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
 
 const openai = new OpenAI({
     apiKey: apiKey,
@@ -259,12 +259,20 @@ export const generateSproutSpeech = async (text: string): Promise<string | undef
     try {
         const mp3 = await openai.audio.speech.create({
             model: "tts-1",
-            voice: "nova",
-            input: `Say in a cheerful voice: ${text}`,
+            voice: "shimmer",
+            input: text,
         });
 
-        const buffer = Buffer.from(await mp3.arrayBuffer());
-        return "data:audio/mp3;base64," + buffer.toString('base64');
+        const buffer = await mp3.arrayBuffer();
+        let binaryString = "";
+        const bytes = new Uint8Array(buffer);
+        // Process in chunks to avoid stack overflow for large files
+        const CHUNK_SIZE = 8192;
+        for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+            binaryString += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK_SIZE)));
+        }
+        const base64Final = btoa(binaryString);
+        return "data:audio/mp3;base64," + base64Final;
     } catch (error) {
         console.error("TTS generation error:", error);
         return undefined;

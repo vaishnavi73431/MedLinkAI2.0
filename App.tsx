@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import WelcomeScreen from './components/WelcomeScreen';
+import AuthScreen from './components/AuthScreen';
 import PixelGarden from './components/PixelGarden';
 import ChatInterface from './components/ChatInterface';
 import TaskBoard from './components/TaskBoard';
@@ -18,7 +20,15 @@ import NutritionChat from './components/NutritionChat';
 import DoctorChat from './components/DoctorChat';
 import GlobalChat from './components/GlobalChat';
 import { GameState, HabitTask, ChatMessage, ViewState, FurnitureItem, ZoneType, Reminder } from './types';
-import { Dumbbell, Move, ChevronLeft, ExternalLink, X, Search, Globe, Zap, Utensils, Apple, Activity, HeartPulse } from 'lucide-react';
+import { authService } from './services/authService';
+import { dataService } from './services/dataService';
+import { supabase } from './lib/supabaseClient';
+import {
+  Trophy, Target, Calendar as CalendarIcon, MessageSquare, User, Settings as SettingsIcon,
+  ChevronRight, Star, Zap, Clock, CheckCircle2, XCircle, Menu, X, Plus, ArrowRight,
+  TrendingUp, Award, Dumbbell, Move, ChevronLeft, ExternalLink, Search, Globe,
+  Utensils, Apple, Activity, HeartPulse
+} from 'lucide-react';
 
 interface GameNotification {
   id: string;
@@ -51,7 +61,11 @@ const GLOBAL_BOT_MESSAGES = [
 ];
 
 const App: React.FC = () => {
+  const [authStatus, setAuthStatus] = useState<'welcome' | 'login' | 'signup' | 'authenticated'>('welcome');
   const [currentView, setCurrentView] = useState<ViewState>('garden');
+
+  // ... existing state declarations ...
+
   const [mobileEntrySource, setMobileEntrySource] = useState<'home' | 'chat'>('home');
   const [isTrainOpen, setIsTrainOpen] = useState(false);
   const [isCampingOpen, setIsCampingOpen] = useState(false);
@@ -162,6 +176,129 @@ const App: React.FC = () => {
       timestamp: Date.now() - 1800000
     }
   ]);
+
+  // Load User Data on Auth
+  useEffect(() => {
+    const loadUserData = async () => {
+      if (authStatus === 'authenticated') {
+        const { session } = await authService.getSession();
+        if (session?.user) {
+          const { data: profile } = await dataService.getProfile(session.user.id);
+
+          if (profile) {
+            setGameState(prev => ({
+              ...prev,
+              level: profile.level,
+              score: profile.score,
+              maxScoreForLevel: profile.max_score_for_level,
+              inventory: profile.inventory || [],
+              placedItems: profile.placed_items || [],
+              unlockedZones: (profile.unlocked_zones as any[]) || ['home'],
+              removedTrees: profile.removed_trees || []
+            }));
+            console.log("Loaded user profile:", profile);
+          } else {
+            // Self-healing: Create profile if missing (e.g. old user)
+            console.log("Profile missing. Creating new profile for existing user...");
+            const { data: newProfile, error: createError } = await dataService.createProfile(session.user.id, session.user.email || 'User');
+            if (newProfile) {
+              console.log("Created missing profile:", newProfile);
+              // No need to setGameState here as it uses defaults, but future refreshes will work.
+            } else {
+              console.error("Failed to auto-create profile:", createError);
+              alert("Account sync error. Please sign out and sign in again.");
+            }
+          }
+        }
+      }
+    };
+    loadUserData();
+  }, [authStatus]);
+
+  // Load Chat History
+  useEffect(() => {
+    const loadChatHistory = async () => {
+      if (authStatus === 'authenticated') {
+        const { session } = await authService.getSession();
+        if (session?.user) {
+          const userId = session.user.id;
+
+          const { data: sproutChats } = await dataService.getChatHistory(userId, 'sprout');
+          console.log(`[App] Sprout chats: ${sproutChats?.length}`);
+
+          if (sproutChats && sproutChats.length > 0) {
+            const formatted = sproutChats.map((msg: any) => ({
+              id: msg.id,
+              sender: msg.sender as 'user' | 'bot' | 'other',
+              text: msg.text,
+              timestamp: Number(msg.timestamp),
+              senderName: msg.sender === 'bot' ? 'Sprout' : undefined
+            }));
+            setMessages(formatted);
+          } else {
+            console.log("[App] No Sprout history found.");
+          }
+
+          const { data: trainerChats } = await dataService.getChatHistory(userId, 'trainer');
+          if (trainerChats && trainerChats.length > 0) {
+            const formatted = trainerChats.map((msg: any) => ({
+              id: msg.id,
+              sender: msg.sender as 'user' | 'bot' | 'other',
+              text: msg.text,
+              timestamp: Number(msg.timestamp)
+            }));
+            setTrainerMessages(formatted);
+          }
+
+          const { data: nutritionChats } = await dataService.getChatHistory(userId, 'nutrition');
+          if (nutritionChats && nutritionChats.length > 0) {
+            const formatted = nutritionChats.map((msg: any) => ({
+              id: msg.id,
+              sender: msg.sender as 'user' | 'bot' | 'other',
+              text: msg.text,
+              timestamp: Number(msg.timestamp)
+            }));
+            setNutritionMessages(formatted);
+          }
+
+          const { data: doctorChats } = await dataService.getChatHistory(userId, 'doctor');
+          if (doctorChats && doctorChats.length > 0) {
+            const formatted = doctorChats.map((msg: any) => ({
+              id: msg.id,
+              sender: msg.sender as 'user' | 'bot' | 'other',
+              text: msg.text,
+              timestamp: Number(msg.timestamp)
+            }));
+            setDoctorMessages(formatted);
+          }
+        }
+      }
+    };
+    loadChatHistory();
+  }, [authStatus]);
+
+  // Auto-Save Game State (Debounced)
+  useEffect(() => {
+    if (authStatus !== 'authenticated') return;
+
+    const saveState = setTimeout(async () => {
+      const { session } = await authService.getSession();
+      if (session?.user) {
+        await dataService.syncGameState(session.user.id, {
+          level: gameState.level,
+          score: gameState.score,
+          maxScoreForLevel: gameState.maxScoreForLevel,
+          inventory: gameState.inventory,
+          placedItems: gameState.placedItems,
+          unlockedZones: gameState.unlockedZones,
+          removedTrees: gameState.removedTrees,
+        });
+        console.log("Auto-saved game state");
+      }
+    }, 2000); // Debounce for 2 seconds
+
+    return () => clearTimeout(saveState);
+  }, [gameState, authStatus]);
 
   useEffect(() => {
     remindersRef.current = gameState.reminders;
@@ -1499,65 +1636,84 @@ const App: React.FC = () => {
   return (
     <div className="h-screen w-full bg-stone-900 flex justify-center items-center overflow-hidden">
       <div className="relative w-full h-full max-w-md bg-[#8CBF82] flex flex-col shadow-2xl overflow-hidden border-x-4 border-[#556B2F]">
-        <div className="absolute top-4 left-4 z-50 pointer-events-none">
-          <div className="bg-white/90 backdrop-blur-sm border-2 border-[#556B2F] px-3 py-1 rounded-xl shadow-lg">
-            <span className="text-[#33691E] font-bold text-lg font-mono">
-              {currentTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}
-            </span>
-          </div>
-        </div>
-        <div className="flex-1 relative flex flex-col min-h-0 bg-[#E8F5E9]">
-          <div className={`${isGardenVisible ? 'flex' : 'hidden'} absolute inset-0 z-0`}>
-            <PixelGarden
-              gameState={gameState}
-              currentTime={currentTime}
-              onRemoveTree={handleRemoveTree}
-              onTrainClick={() => setIsTrainOpen(true)}
-              onCampingClick={() => setIsCampingOpen(true)}
-              onRestaurantClick={() => setIsRestaurantOpen(true)}
-              onGymClick={() => setIsGymOpen(true)}
-              onSevaHubClick={() => setIsSevaHubOpen(true)}
-              onYogaClick={() => setIsYogaOpen(true)}
-              onHospitalClick={() => setCurrentView('medbay')}
-              onSproutClick={() => {
-                setMobileEntrySource('chat');
-                setCurrentView('chat');
-              }}
-              notifications={notifications}
-              isVisible={isGardenVisible}
-              onShopOpen={() => setIsShopOpen(true)}
-              onPlaceItem={handlePlaceItem}
-            />
-          </div>
-          {currentView !== 'garden' && (
-            <div className={`flex-1 flex flex-col min-h-0 overflow-hidden relative z-10 
-                      ${currentView === 'chat' || currentView === 'trainer-chat' || currentView === 'global-chat' || currentView === 'nutrition-chat' || currentView === 'doctor-chat' ? 'p-4 pb-28 bg-stone-900/40 backdrop-blur-[2px]' :
-                currentView === 'gym-interior' || currentView === 'restaurant-interior' || currentView === 'hospital-interior' ? 'p-0 pb-0 bg-white' :
-                  'p-4 pb-28 bg-[#E8F5E9]'}`}>
-              {renderContent()}
+
+        {/* AUTHENTICATION FLOW */}
+        {authStatus === 'welcome' && (
+          <WelcomeScreen onLogin={() => setAuthStatus('login')} onSignup={() => setAuthStatus('signup')} />
+        )}
+
+        {(authStatus === 'login' || authStatus === 'signup') && (
+          <AuthScreen
+            mode={authStatus}
+            onBack={() => setAuthStatus('welcome')}
+            onSuccess={() => setAuthStatus('authenticated')}
+          />
+        )}
+
+        {/* MAIN GAME APPLICATION */}
+        {authStatus === 'authenticated' && (
+          <>
+            <div className="absolute top-4 left-4 z-50 pointer-events-none">
+              <div className="bg-white/90 backdrop-blur-sm border-2 border-[#556B2F] px-3 py-1 rounded-xl shadow-lg">
+                <span className="text-[#33691E] font-bold text-lg font-mono">
+                  {currentTime.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true })}
+                </span>
+              </div>
             </div>
-          )}
-        </div>
-        <TrainBoard isOpen={isTrainOpen} onClose={(reward) => { if (reward) handleTaskComplete(50); setIsTrainOpen(false); }} />
-        <CampingBoard isOpen={isCampingOpen} onClose={(reward) => { if (reward) handleTaskComplete(40); setIsCampingOpen(false); }} />
-        <RestaurantBoard isOpen={isRestaurantOpen} onClose={(reward) => { if (reward) handleTaskComplete(60); setIsRestaurantOpen(false); }} />
-        <GymBoard isOpen={isGymOpen} onClose={(reward) => { if (reward) handleTaskComplete(50); setIsGymOpen(false); }} />
-        <SevaHubBoard isOpen={isSevaHubOpen} onClose={(reward) => { if (reward) handleTaskComplete(100); setIsSevaHubOpen(false); }} />
-        <YogaBoard isOpen={isYogaOpen} onClose={(reward) => { if (reward) handleTaskComplete(50); setIsYogaOpen(false); }} />
-        <div className="absolute bottom-0 left-0 w-full z-50">
-          <NavBar currentView={currentView} setView={(v) => {
-            if (v === 'chat') setMobileEntrySource('home');
-            setCurrentView(v);
-          }} />
-        </div>
+            <div className="flex-1 relative flex flex-col min-h-0 bg-[#E8F5E9]">
+              <div className={`${isGardenVisible ? 'flex' : 'hidden'} absolute inset-0 z-0`}>
+                <PixelGarden
+                  gameState={gameState}
+                  currentTime={currentTime}
+                  onRemoveTree={handleRemoveTree}
+                  onTrainClick={() => setIsTrainOpen(true)}
+                  onCampingClick={() => setIsCampingOpen(true)}
+                  onRestaurantClick={() => setIsRestaurantOpen(true)}
+                  onGymClick={() => setIsGymOpen(true)}
+                  onSevaHubClick={() => setIsSevaHubOpen(true)}
+                  onYogaClick={() => setIsYogaOpen(true)}
+                  onHospitalClick={() => setCurrentView('medbay')}
+                  onSproutClick={() => {
+                    setMobileEntrySource('chat');
+                    setCurrentView('chat');
+                  }}
+                  notifications={notifications}
+                  isVisible={isGardenVisible}
+                  onShopOpen={() => setIsShopOpen(true)}
+                  onPlaceItem={handlePlaceItem}
+                />
+              </div>
+              {currentView !== 'garden' && (
+                <div className={`flex-1 flex flex-col min-h-0 overflow-hidden relative z-10 
+                          ${currentView === 'chat' || currentView === 'trainer-chat' || currentView === 'global-chat' || currentView === 'nutrition-chat' || currentView === 'doctor-chat' ? 'p-4 pb-28 bg-stone-900/40 backdrop-blur-[2px]' :
+                    currentView === 'gym-interior' || currentView === 'restaurant-interior' || currentView === 'hospital-interior' ? 'p-0 pb-0 bg-white' :
+                      'p-4 pb-28 bg-[#E8F5E9]'}`}>
+                  {renderContent()}
+                </div>
+              )}
+            </div>
+            <TrainBoard isOpen={isTrainOpen} onClose={(reward) => { if (reward) handleTaskComplete(50); setIsTrainOpen(false); }} />
+            <CampingBoard isOpen={isCampingOpen} onClose={(reward) => { if (reward) handleTaskComplete(40); setIsCampingOpen(false); }} />
+            <RestaurantBoard isOpen={isRestaurantOpen} onClose={(reward) => { if (reward) handleTaskComplete(60); setIsRestaurantOpen(false); }} />
+            <GymBoard isOpen={isGymOpen} onClose={(reward) => { if (reward) handleTaskComplete(50); setIsGymOpen(false); }} />
+            <SevaHubBoard isOpen={isSevaHubOpen} onClose={(reward) => { if (reward) handleTaskComplete(100); setIsSevaHubOpen(false); }} />
+            <YogaBoard isOpen={isYogaOpen} onClose={(reward) => { if (reward) handleTaskComplete(50); setIsYogaOpen(false); }} />
+            <div className="absolute bottom-0 left-0 w-full z-50">
+              <NavBar currentView={currentView} setView={(v) => {
+                if (v === 'chat') setMobileEntrySource('home');
+                setCurrentView(v);
+              }} />
+            </div>
+            {isShopOpen && (
+              <ShopBoard
+                currentCoins={gameState.score}
+                onBuy={handleShopBuy}
+                onClose={() => setIsShopOpen(false)}
+              />
+            )}
+          </>
+        )}
       </div>
-      {isShopOpen && (
-        <ShopBoard
-          currentCoins={gameState.score}
-          onBuy={handleShopBuy}
-          onClose={() => setIsShopOpen(false)}
-        />
-      )}
     </div>
   );
 };

@@ -22,23 +22,7 @@ function decodeBase64ToUint8Array(base64: string) {
   return bytes;
 }
 
-async function decodeAudioData(
-  data: Uint8Array,
-  ctx: AudioContext,
-  sampleRate: number,
-  numChannels: number,
-): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer);
-  const frameCount = dataInt16.length / numChannels;
-  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
-  for (let channel = 0; channel < numChannels; channel++) {
-    const channelData = buffer.getChannelData(channel);
-    for (let i = 0; i < frameCount; i++) {
-      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
-    }
-  }
-  return buffer;
-}
+
 
 const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, setTasks, onTaskComplete, currentScore, setGameState }) => {
   const [isGenerating, setIsGenerating] = useState(false);
@@ -82,17 +66,31 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, setTasks, onTaskComplete, 
   const audioContextRef = useRef<AudioContext | null>(null);
 
   // Audio Playback helper
+  const resumeAudio = async () => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+    }
+    const ctx = audioContextRef.current;
+    if (ctx.state === 'suspended') {
+      try {
+        await ctx.resume();
+      } catch (e) {
+        console.error("Audio resume failed", e);
+      }
+    }
+  };
+
   const speakText = async (text: string) => {
     try {
       const base64Audio = await generateSproutSpeech(text);
       if (!base64Audio) return;
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
-      }
-      const ctx = audioContextRef.current;
-      if (ctx.state === 'suspended') await ctx.resume();
-      const uint8Audio = decodeBase64ToUint8Array(base64Audio);
-      const audioBuffer = await decodeAudioData(uint8Audio, ctx, 24000, 1);
+
+      await resumeAudio();
+
+      const ctx = audioContextRef.current!;
+      const base64String = base64Audio.split(',')[1] || base64Audio;
+      const uint8Audio = decodeBase64ToUint8Array(base64String);
+      const audioBuffer = await ctx.decodeAudioData(uint8Audio.buffer);
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(ctx.destination);
@@ -465,6 +463,7 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, setTasks, onTaskComplete, 
                   )}
                   <button
                     onClick={() => {
+                      resumeAudio();
                       setVerifyingTask(task);
                       if (isZenTask) {
                         startCamera();

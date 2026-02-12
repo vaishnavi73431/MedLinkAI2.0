@@ -3,6 +3,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, Bot, User, Calendar, Volume2, VolumeX, AlarmClockCheck, Bell, ShieldCheck, Info, Mic, MicOff, AlertCircle } from 'lucide-react';
 import { ChatMessage, GameState, Reminder } from '../types';
 import { chatWithSprout, generateSproutSpeech } from '../services/openaiService';
+import { dataService } from '../services/dataService';
+import { authService } from '../services/authService';
 
 interface ChatInterfaceProps {
   messages: ChatMessage[];
@@ -21,23 +23,7 @@ function decodeBase64ToUint8Array(base64: string) {
   return bytes;
 }
 
-async function decodeAudioData(
-  data: Uint8Array,
-  ctx: AudioContext,
-  sampleRate: number,
-  numChannels: number,
-): Promise<AudioBuffer> {
-  const dataInt16 = new Int16Array(data.buffer);
-  const frameCount = dataInt16.length / numChannels;
-  const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
-  for (let channel = 0; channel < numChannels; channel++) {
-    const channelData = buffer.getChannelData(channel);
-    for (let i = 0; i < frameCount; i++) {
-      channelData[i] = dataInt16[i * numChannels + channel] / 32768.0;
-    }
-  }
-  return buffer;
-}
+
 
 const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, setMessages, gameState, setGameState }) => {
   const [inputText, setInputText] = useState('');
@@ -78,26 +64,52 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, setMessages, ga
     }
   };
 
+  // Audio Playback helper
+  const resumeAudio = async () => {
+    if (!audioContextRef.current) {
+      audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+    }
+    const ctx = audioContextRef.current;
+    if (ctx.state === 'suspended') {
+      try {
+        await ctx.resume();
+        console.log("AudioContext resumed successfully");
+      } catch (e) {
+        console.error("Audio resume failed", e);
+      }
+    }
+  };
+
   const speakText = async (text: string) => {
     if (isMuted) return;
     try {
+      console.log("Generating speech for:", text);
       const base64Audio = await generateSproutSpeech(text);
-      if (!base64Audio) return;
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      if (!base64Audio) {
+        console.error("No audio data received from OpenAI");
+        return;
       }
-      const ctx = audioContextRef.current;
-      if (ctx.state === 'suspended') await ctx.resume();
-      const uint8Audio = decodeBase64ToUint8Array(base64Audio);
-      const audioBuffer = await decodeAudioData(uint8Audio, ctx, 24000, 1);
+
+      await resumeAudio();
+
+      const ctx = audioContextRef.current!;
+      const base64String = base64Audio.split(',')[1] || base64Audio;
+      const uint8Audio = decodeBase64ToUint8Array(base64String);
+      const audioBuffer = await ctx.decodeAudioData(uint8Audio.buffer);
       const source = ctx.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(ctx.destination);
       source.start();
+      console.log("Audio playback started");
+      // Add visual confirmation for user debugging
+      // alert("Sprout is speaking! 🔊"); // Commented out to be less intrusive, but kept for debug if needed
     } catch (err) {
       console.error("Speech playback failed:", err);
+      alert("Audio Error: " + (err instanceof Error ? err.message : String(err)));
     }
   };
+
+  // ... (existing code)
 
   const scheduleReminderGlobally = (task: string, timeStr: string) => {
     const timeRegex = /(\d{1,2})(?::(\d{2}))?\s*(am|pm|AM|PM)?/;
@@ -115,7 +127,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, setMessages, ga
     const target = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hours, minutes, 0);
     if (target < now) target.setDate(target.getDate() + 1);
 
-    // FIX: Changed 'new Reminder' to 'newReminder' to fix syntax error and defined variable reference
     const newReminder: Reminder = {
       id: Math.random().toString(36).substr(2, 9),
       task: task,
@@ -131,11 +142,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, setMessages, ga
     const displayTime = target.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', hour12: true });
     setLastScheduledTask(`${task} at ${displayTime}`);
     setTimeout(() => setLastScheduledTask(null), 6000);
-    // Added 3s interval for reminder confirmation speech
-    setTimeout(() => speakText(`Got it! I've armed a system alarm for ${task} at ${displayTime}.`), 3000);
+    // Play prompt immediately
+    speakText(`Got it! I've armed a system alarm for ${task} at ${displayTime}.`);
   };
 
   const handlePlanDay = async () => {
+    await resumeAudio(); // Resume on user click
     const userMsg: ChatMessage = {
       id: Date.now().toString(),
       sender: 'user',
@@ -157,11 +169,19 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, setMessages, ga
 
     setMessages(prev => [...prev, botMsg]);
     setIsLoading(false);
-    // Added 3s interval for Plan Day speech
-    setTimeout(() => speakText(responseText), 3000);
+    // Play speech immediately
+    speakText(responseText);
+
+    // Save to Supabase
+    const { session } = await authService.getSession();
+    if (session?.user) {
+      await dataService.saveChatMessage(session.user.id, 'sprout', userMsg);
+      await dataService.saveChatMessage(session.user.id, 'sprout', botMsg);
+    }
   };
 
   const handleSend = async (forcedText?: string) => {
+    await resumeAudio(); // Resume on user interaction
     const textToSubmit = (forcedText || inputText).trim();
     if (!textToSubmit || isLoading) return;
 
@@ -194,8 +214,21 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, setMessages, ga
     const botMsg: ChatMessage = { id: (Date.now() + 1).toString(), sender: 'bot', text: responseText, timestamp: Date.now() };
     setMessages(prev => [...prev, botMsg]);
     setIsLoading(false);
-    // Added 3s interval for Chat speech
-    if (!timeMatch) setTimeout(() => speakText(responseText), 3000);
+    // Play speech immediately
+    if (!timeMatch) speakText(responseText);
+
+    // Save to Supabase
+    const { session } = await authService.getSession();
+    if (session?.user) {
+      const { error: err1 } = await dataService.saveChatMessage(session.user.id, 'sprout', userMsg);
+      if (err1) {
+        console.error("Save chat error (user):", err1);
+        alert(`Error saving chat: ${err1.message}`);
+      }
+
+      const { error: err2 } = await dataService.saveChatMessage(session.user.id, 'sprout', botMsg);
+      if (err2) console.error("Save chat error (bot):", err2);
+    }
   };
 
   const toggleListening = () => {
@@ -276,13 +309,22 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, setMessages, ga
             {isMuted ? <VolumeX size={14} /> : <Volume2 size={14} />}
           </button>
         </div>
-        <button
-          onClick={handlePlanDay}
-          className="flex items-center gap-1.5 bg-indigo-700 hover:bg-indigo-600 text-indigo-100 px-3 py-1.5 rounded border-b-2 border-indigo-900 active:border-b-0 active:translate-y-0.5 transition-all text-xs font-bold uppercase tracking-wider"
-        >
-          <Calendar size={14} />
-          Plan Day
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => speakText("Testing, testing! Can you hear me now?")}
+            className="flex items-center gap-1.5 bg-pink-700 hover:bg-pink-600 text-pink-100 px-3 py-1.5 rounded border-b-2 border-pink-900 active:border-b-0 active:translate-y-0.5 transition-all text-xs font-bold uppercase tracking-wider"
+          >
+            <Volume2 size={14} />
+            Test Voice
+          </button>
+          <button
+            onClick={handlePlanDay}
+            className="flex items-center gap-1.5 bg-indigo-700 hover:bg-indigo-600 text-indigo-100 px-3 py-1.5 rounded border-b-2 border-indigo-900 active:border-b-0 active:translate-y-0.5 transition-all text-xs font-bold uppercase tracking-wider"
+          >
+            <Calendar size={14} />
+            Plan Day
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto p-3 space-y-4 bg-stone-900/50 relative">

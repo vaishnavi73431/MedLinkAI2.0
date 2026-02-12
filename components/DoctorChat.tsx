@@ -3,6 +3,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, User, Activity, Stethoscope, HeartPulse, ChevronLeft, ShieldCheck } from 'lucide-react';
 import { ChatMessage } from '../types';
 import { chatWithDoctor } from '../services/openaiService';
+import { dataService } from '../services/dataService';
+import { authService } from '../services/authService';
 
 interface DoctorChatProps {
   messages: ChatMessage[];
@@ -37,6 +39,13 @@ const DoctorChat: React.FC<DoctorChatProps> = ({ messages, setMessages, onBack }
     const botMsg: ChatMessage = { id: (Date.now() + 1).toString(), sender: 'bot', text: responseText, timestamp: Date.now() };
     setMessages(prev => [...prev, botMsg]);
     setIsLoading(false);
+
+    // Save to Supabase
+    const { session } = await authService.getSession();
+    if (session?.user) {
+      await dataService.saveChatMessage(session.user.id, 'doctor', userMsg);
+      await dataService.saveChatMessage(session.user.id, 'doctor', botMsg);
+    }
   };
 
   return (

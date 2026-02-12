@@ -73,4 +73,17 @@ export interface Doctor {
   avatarColor: string;
 }
 
+export interface UserProfile {
+  id: string;
+  full_name: string;
+  level: number;
+  score: number;
+  max_score_for_level: number;
+  unlocked_zones: string[];
+  inventory: FurnitureItem[];
+  placed_items: { id: string, item: FurnitureItem, x: number, y: number }[];
+  removed_trees: number[];
+  updated_at?: string;
+}
+
 export type ViewState = 'garden' | 'missions' | 'chat' | 'leaderboard' | 'medbay' | 'gym-interior' | 'restaurant-interior' | 'hospital-interior' | 'trainer-chat' | 'global-chat' | 'nutrition-chat' | 'doctor-chat';

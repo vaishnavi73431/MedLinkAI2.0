@@ -4,6 +4,8 @@ import { createPortal } from 'react-dom';
 import { Send, User, Utensils, Apple, Camera, X, Loader2, Info, Sparkles } from 'lucide-react';
 import { ChatMessage } from '../types';
 import { chatWithNutritionBot } from '../services/openaiService';
+import { dataService } from '../services/dataService';
+import { authService } from '../services/authService';
 
 interface NutritionChatProps {
   messages: ChatMessage[];
@@ -90,6 +92,13 @@ const NutritionChat: React.FC<NutritionChatProps> = ({ messages, setMessages, on
     const botMsg: ChatMessage = { id: (Date.now() + 1).toString(), sender: 'bot', text: responseText, timestamp: Date.now() };
     setMessages(prev => [...prev, botMsg]);
     setIsLoading(false);
+
+    // Save to Supabase
+    const { session } = await authService.getSession();
+    if (session?.user) {
+      await dataService.saveChatMessage(session.user.id, 'nutrition', userMsg);
+      await dataService.saveChatMessage(session.user.id, 'nutrition', botMsg);
+    }
   };
 
   const renderCameraModal = () => {

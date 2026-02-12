@@ -1,9 +1,10 @@
 
 // Clean up corrupted imports and duplicate declarations
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { MapPin, MessageCircle, ShoppingBag, BookOpen, ChevronLeft, LayoutGrid, Newspaper, Search, Bell, Home, Tent, Utensils, Hospital, Dumbbell, Flower2, Move } from 'lucide-react';
+import { MapPin, MessageCircle, ShoppingBag, BookOpen, ChevronLeft, LayoutGrid, Newspaper, Search, Bell, Home, Tent, Utensils, Hospital, Dumbbell, Flower2, Move, Camera } from 'lucide-react';
 import { ChatMessage, GameState } from '../types';
 import ChatInterface from './ChatInterface';
+import SocialFeed from './SocialFeed';
 
 interface MobileInterfaceProps {
   messages: ChatMessage[];
@@ -17,7 +18,7 @@ interface MobileInterfaceProps {
   onVisitSevaHub?: () => void;
 }
 
-type AppId = 'home' | 'chat' | 'location' | 'shopping' | 'newsletter';
+type AppId = 'home' | 'chat' | 'location' | 'shopping' | 'newsletter' | 'social';
 
 const MobileInterface: React.FC<MobileInterfaceProps> = ({ messages, setMessages, gameState, setGameState, initialApp = 'home', onVisitGym, onVisitRestaurant, onVisitHospital, onVisitSevaHub }) => {
   const [activeApp, setActiveApp] = useState<AppId>(initialApp);
@@ -361,6 +362,8 @@ const MobileInterface: React.FC<MobileInterfaceProps> = ({ messages, setMessages
 
   const renderApp = () => {
     switch (activeApp) {
+      case 'social':
+        return <SocialFeed onBack={() => setActiveApp('home')} />;
       case 'chat':
         return (
           <div className="h-full flex flex-col">
@@ -528,6 +531,12 @@ const MobileInterface: React.FC<MobileInterfaceProps> = ({ messages, setMessages
                   color="#F9B17A"
                   label="News"
                   onClick={() => setActiveApp('newsletter')}
+                />
+                <AppIcon
+                  icon={Camera}
+                  color="#EDB7ED"
+                  label="Social"
+                  onClick={() => setActiveApp('social')}
                 />
               </div>
             </div>

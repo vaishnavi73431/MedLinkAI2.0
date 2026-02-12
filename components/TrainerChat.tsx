@@ -3,6 +3,8 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Send, User, Dumbbell, Zap, Flame, Trophy } from 'lucide-react';
 import { ChatMessage } from '../types';
 import { chatWithTrainer } from '../services/openaiService';
+import { dataService } from '../services/dataService';
+import { authService } from '../services/authService';
 
 interface TrainerChatProps {
   messages: ChatMessage[];
@@ -36,6 +38,13 @@ const TrainerChat: React.FC<TrainerChatProps> = ({ messages, setMessages }) => {
     const botMsg: ChatMessage = { id: (Date.now() + 1).toString(), sender: 'bot', text: responseText, timestamp: Date.now() };
     setMessages(prev => [...prev, botMsg]);
     setIsLoading(false);
+
+    // Save to Supabase
+    const { session } = await authService.getSession();
+    if (session?.user) {
+      await dataService.saveChatMessage(session.user.id, 'trainer', userMsg);
+      await dataService.saveChatMessage(session.user.id, 'trainer', botMsg);
+    }
   };
 
   return (

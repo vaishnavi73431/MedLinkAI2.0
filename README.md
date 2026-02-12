@@ -1,4 +1,4 @@
-# Tuski Habit Builder 🌱
+# medlhabit 🌱
 > **Tagline**: Build Habits, Grow Your World.
 
 ## 1. The Problem
