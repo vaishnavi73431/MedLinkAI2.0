@@ -75,3 +75,4 @@ How we turn health into revenue:
    ```bash
    npm run dev
    ```
+# MedLinkAI2.0
