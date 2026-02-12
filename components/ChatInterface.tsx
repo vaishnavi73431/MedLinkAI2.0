@@ -201,7 +201,15 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, setMessages, ga
     setInterimText('');
     setIsLoading(true);
 
-    const responseText = await chatWithSprout(messages, textToSubmit);
+    // Fetch User Profile for Context
+    const { session } = await authService.getSession();
+    let userProfile;
+    if (session?.user) {
+      const { data } = await dataService.getProfile(session.user.id);
+      userProfile = data;
+    }
+
+    const responseText = await chatWithSprout(messages, textToSubmit, userProfile || undefined);
 
     const timeRegex = /(\d{1,2}(?::\d{2})?\s*(am|pm|AM|PM))|(\d{1,2}:\d{2})/;
     const timeMatch = textToSubmit.match(timeRegex);
@@ -218,7 +226,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, setMessages, ga
     if (!timeMatch) speakText(responseText);
 
     // Save to Supabase
-    const { session } = await authService.getSession();
     if (session?.user) {
       const { error: err1 } = await dataService.saveChatMessage(session.user.id, 'sprout', userMsg);
       if (err1) {

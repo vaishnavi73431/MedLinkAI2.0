@@ -1,10 +1,12 @@
 
 // Clean up corrupted imports and duplicate declarations
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { MapPin, MessageCircle, ShoppingBag, BookOpen, ChevronLeft, LayoutGrid, Newspaper, Search, Bell, Home, Tent, Utensils, Hospital, Dumbbell, Flower2, Move, Camera } from 'lucide-react';
-import { ChatMessage, GameState } from '../types';
+import { MapPin, MessageCircle, ShoppingBag, BookOpen, ChevronLeft, LayoutGrid, Newspaper, Search, Bell, Home, Tent, Utensils, Hospital, Dumbbell, Flower2, Move, Camera, User, Save } from 'lucide-react';
+import { ChatMessage, GameState, UserProfile } from '../types';
 import ChatInterface from './ChatInterface';
 import SocialFeed from './SocialFeed';
+import { authService } from '../services/authService';
+import { dataService } from '../services/dataService';
 
 interface MobileInterfaceProps {
   messages: ChatMessage[];
@@ -18,7 +20,238 @@ interface MobileInterfaceProps {
   onVisitSevaHub?: () => void;
 }
 
-type AppId = 'home' | 'chat' | 'location' | 'shopping' | 'newsletter' | 'social';
+type AppId = 'home' | 'chat' | 'location' | 'shopping' | 'newsletter' | 'social' | 'profile';
+
+const ProfileView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [profession, setProfession] = useState('');
+  const [goal, setGoal] = useState('');
+  const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+
+  useEffect(() => {
+    const loadProfile = async () => {
+      const { session } = await authService.getSession();
+      if (session?.user) {
+        const { data } = await dataService.getProfile(session.user.id);
+        if (data) {
+          setProfession(data.profession || '');
+          setGoal(data.goal || '');
+        }
+      }
+      setProfileLoading(false);
+    };
+    loadProfile();
+  }, []);
+
+  const handleSaveProfile = async () => {
+    setSaveStatus('saving');
+    const { session } = await authService.getSession();
+    if (session?.user) {
+      const { error } = await dataService.updateProfile(session.user.id, {
+        profession,
+        goal
+      });
+      if (!error) {
+        setSaveStatus('saved');
+        setTimeout(() => setSaveStatus('idle'), 2000);
+      } else {
+        setSaveStatus('error');
+      }
+    }
+  };
+
+  return (
+    <div className="h-full flex flex-col bg-white">
+      <div className="p-4 border-b flex items-center gap-4 bg-stone-50">
+        <button onClick={onBack} className="p-2 hover:bg-stone-200 rounded-full transition-colors">
+          <ChevronLeft size={20} className="text-stone-600" />
+        </button>
+        <h2 className="font-black text-lg uppercase tracking-tight text-stone-800">My Profile</h2>
+      </div>
+
+      <div className="flex-1 p-6 flex flex-col gap-6 overflow-y-auto">
+        <div className="flex flex-col items-center gap-4 py-4">
+          <div className="w-24 h-24 bg-purple-100 rounded-full flex items-center justify-center border-4 border-white shadow-lg">
+            <User size={40} className="text-purple-400" />
+          </div>
+          <p className="text-xs font-bold text-stone-400 uppercase tracking-widest">Personalize Your Journey</p>
+        </div>
+
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-stone-500 uppercase tracking-wider ml-1">My Profession</label>
+            <input
+              type="text"
+              value={profession}
+              onChange={(e) => setProfession(e.target.value)}
+              placeholder="e.g. Software Engineer, Teacher..."
+              className="w-full p-4 bg-stone-50 border-2 border-stone-100 rounded-2xl focus:border-purple-300 focus:outline-none focus:ring-4 focus:ring-purple-100 transition-all font-medium text-stone-700"
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-xs font-bold text-stone-500 uppercase tracking-wider ml-1">My Health Goal</label>
+            <textarea
+              value={goal}
+              onChange={(e) => setGoal(e.target.value)}
+              placeholder="e.g. Lose weight, reduce anxiety, build muscle..."
+              className="w-full p-4 bg-stone-50 border-2 border-stone-100 rounded-2xl focus:border-purple-300 focus:outline-none focus:ring-4 focus:ring-purple-100 transition-all font-medium text-stone-700 h-32 resize-none"
+            />
+          </div>
+        </div>
+
+        <button
+          onClick={handleSaveProfile}
+          disabled={saveStatus === 'saving'}
+          className={`mt-4 w-full py-4 rounded-xl font-bold uppercase tracking-widest shadow-lg transform active:scale-95 transition-all flex items-center justify-center gap-2
+                  ${saveStatus === 'saved' ? 'bg-green-500 text-white' : 'bg-stone-800 text-white hover:bg-stone-700'}
+              `}
+        >
+          {saveStatus === 'saving' ? 'Saving...' : saveStatus === 'saved' ? 'Saved!' : 'Save Profile'}
+          {saveStatus === 'saved' && <Save size={18} />}
+        </button>
+      </div>
+    </div>
+  );
+};
+
+const ShopView: React.FC<{ onBack: () => void; onReward: (amount: number) => void }> = ({ onBack, onReward }) => {
+  const [waitingForReward, setWaitingForReward] = useState(false);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && waitingForReward) {
+        onReward(50);
+        setWaitingForReward(false);
+        alert("Welcome back! You earned 50 coins for exploring healthy options! 🪙");
+      }
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [waitingForReward, onReward]);
+
+  const handleProductClick = (url: string) => {
+    setWaitingForReward(true);
+    window.open(url, '_blank');
+  };
+
+  return (
+    <div className="h-full flex flex-col bg-white">
+      <div className="p-4 border-b flex items-center justify-between bg-stone-50">
+        <button onClick={onBack} className="p-2 hover:bg-stone-200 rounded-full transition-colors">
+          <ChevronLeft size={20} className="text-stone-600" />
+        </button>
+        <div className="flex items-center gap-2">
+          <ShoppingBag size={20} className="text-stone-600" />
+          <span className="text-sm font-black uppercase tracking-tight text-stone-800">Health Shop</span>
+        </div>
+      </div>
+
+      <div className="flex-1 p-4 grid grid-cols-1 gap-4 overflow-y-auto bg-stone-100">
+        {/* Product Card */}
+        <div className="bg-white p-4 rounded-2xl shadow-sm border border-stone-200 flex flex-col gap-3">
+          <div className="aspect-video bg-stone-200 rounded-xl overflow-hidden relative">
+            <img
+              src="https://m.media-amazon.com/images/I/81+3y+7+3JL._SX679_.jpg"
+              alt="Yogabar"
+              className="w-full h-full object-cover"
+            />
+            <div className="absolute top-2 right-2 bg-yellow-400 text-stone-900 text-[10px] font-bold px-2 py-1 rounded shadow-md uppercase tracking-wide">
+              Best Seller
+            </div>
+          </div>
+
+          <div>
+            <h3 className="font-bold text-stone-800 leading-tight">Yogabar Breakfast Bars Variety Pack</h3>
+            <p className="text-xs text-stone-500 mt-1 line-clamp-2">Daily Protein Snack | High Energy & Nutrition Bars | 8g Protein & 7g Fibre</p>
+          </div>
+
+          <div className="flex items-center justify-between mt-2">
+            <div className="flex flex-col">
+              <span className="text-xs text-stone-400 font-bold line-through">₹600</span>
+              <span className="text-lg font-black text-emerald-600">₹450</span>
+            </div>
+            <button
+              onClick={() => handleProductClick("https://www.amazon.in/Yogabar-Breakfast-Protein-Blueberry-Cinnamon/dp/B07CN1K1Z6/ref=sr_1_5?dib=eyJ2IjoiMSJ9.Abh_QmxP6Gn5uzmCjEWs3N38pz3IQNY8G1N3TlDmBvlyrxecces4HB9KUEAT5NvyRsJhGdvle7cQ78XhAKeCfItJJpAWVNLkdHbGvmA1k8a--o98JASCM0Kka8s9HdyMM21obWwlAgmu88gMHM1CzDBLp1eoxoz5m4_eoW1RJ1c_lgtCYKBdCitdx8obk_2uNDsKUe6TQM-xOMHtDMUCFXDwfiafjB_EIs-zFvav5mdk0A9l0yTXmbFtTy6xruGjaIp3h07CEHmO9r3xfMMZk7ET6cBuW7Bs59m3j5fGaDI.oenGGzrUj7e8zKcBZkMBPt9-_9Yi0aVtIAEdF3VT52k&dib_tag=se&keywords=protein%2Bbar&qid=1770916780&sr=8-5&th=1")}
+              className="bg-stone-900 text-white px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider shadow-lg active:scale-95 transition-transform"
+            >
+              Buy Now
+            </button>
+          </div>
+          <div className="bg-emerald-50 text-emerald-700 text-[10px] font-bold p-2 rounded-lg text-center border border-emerald-100">
+            ✨ Earn 50 Coins on View!
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+const NewsView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
+  return (
+    <div className="h-full flex flex-col bg-[#F4F1EA] text-stone-900 font-serif">
+      {/* Header */}
+      <div className="p-4 border-b-4 border-stone-800 flex items-center justify-between bg-[#EFEBE0]">
+        <button onClick={onBack} className="p-2 hover:bg-stone-300 rounded-full transition-colors">
+          <ChevronLeft size={24} className="text-stone-800" />
+        </button>
+        <div className="flex flex-col items-center">
+          <h1 className="font-black text-3xl uppercase tracking-tighter text-stone-900" style={{ fontFamily: '"Playfair Display", serif' }}>Times of HOMESTEAD</h1>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-stone-500 border-t border-b border-stone-400 py-0.5 w-full text-center mt-1">Daily Edition • Vol. 1</p>
+        </div>
+        <div className="w-10"></div> {/* Spacer */}
+      </div>
+
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto p-6">
+        <div className="flex flex-col gap-6">
+
+          {/* Headline Story */}
+          <article className="border-b-2 border-stone-300 pb-6">
+            <h2 className="text-2xl font-bold leading-tight mb-2 font-serif">Sprout AI: The New Pocket Companion for Every Homesteader</h2>
+            <div className="flex items-center gap-2 mb-4 text-stone-500 text-xs font-bold uppercase tracking-wider">
+              <span>By Tech Editor</span> • <span>Just Now</span>
+            </div>
+
+            <div className="float-right ml-4 mb-2 w-1/2">
+              <div className="bg-stone-200 p-2 border border-stone-800 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] rotate-1">
+                <img
+                  src="/sprout_ai_cartoon.png"
+                  alt="Sprout AI Pocket Robot"
+                  className="w-full h-auto grayscale-[20%] contrast-125 block"
+                />
+                <p className="text-[9px] font-bold text-center mt-1 uppercase text-stone-600">Fig 1. Prototype Model</p>
+              </div>
+            </div>
+
+            <p className="text-sm leading-relaxed text-justify mb-4 text-stone-800 font-medium">
+              <span className="font-bold text-3xl float-left mr-1 mt-[-6px]">W</span>e are thinking of launching a Sprout AI mini pocket robot that will stay with homesteaders! This revolutionary little companion is designed to be the perfect sidekick for your daily journey.
+            </p>
+            <p className="text-sm leading-relaxed text-justify mb-4 text-stone-800 font-medium">
+              Unlike standard digital assistants, the Sprout Mini is built to understand the unique challenges of building habits in a busy world. It fits right in your pocket, ready to offer health tips, daily motivation, and even a friendly beep when you achieve your goals.
+            </p>
+            <p className="text-sm leading-relaxed text-justify text-stone-800 font-medium">
+              "It's not just a robot; it's a friend," says the lead developer. Stay tuned for more updates on this exciting addition to the Homestead family!
+            </p>
+          </article>
+
+          {/* Minor Stories */}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="border-r border-stone-300 pr-4">
+              <h3 className="font-bold text-sm uppercase mb-1">Local Weather</h3>
+              <p className="text-xs text-stone-600">Sunny skies ahead for the pixel village. perfect for planting new habits.</p>
+            </div>
+            <div>
+              <h3 className="font-bold text-sm uppercase mb-1">Market Watch</h3>
+              <p className="text-xs text-stone-600">Gym token values are up 15% as more residents hit their fitness goals.</p>
+            </div>
+          </div>
+
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const MobileInterface: React.FC<MobileInterfaceProps> = ({ messages, setMessages, gameState, setGameState, initialApp = 'home', onVisitGym, onVisitRestaurant, onVisitHospital, onVisitSevaHub }) => {
   const [activeApp, setActiveApp] = useState<AppId>(initialApp);
@@ -379,33 +612,11 @@ const MobileInterface: React.FC<MobileInterfaceProps> = ({ messages, setMessages
           </div>
         );
       case 'newsletter':
-        return (
-          <div className="h-full flex flex-col bg-stone-50">
-            <div className="p-4 border-b bg-white flex items-center gap-4">
-              <button onClick={() => setActiveApp('home')} className="p-2 hover:bg-stone-100 rounded-full">
-                <ChevronLeft size={20} />
-              </button>
-              <h2 className="font-black text-lg uppercase tracking-tight">World News</h2>
-            </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-4">
-              <p className="text-center text-xs font-bold text-stone-400 uppercase tracking-widest py-8">Fetching Daily Brief...</p>
-            </div>
-          </div>
-        );
+        return <NewsView onBack={() => setActiveApp('home')} />;
       case 'shopping':
-        return (
-          <div className="h-full flex flex-col bg-white">
-            <div className="p-4 border-b flex items-center justify-between">
-              <button onClick={() => setActiveApp('home')} className="p-2 hover:bg-stone-100 rounded-full">
-                <ChevronLeft size={20} />
-              </button>
-              <ShoppingBag size={20} className="text-stone-600" />
-            </div>
-            <div className="flex-1 p-4 grid grid-cols-2 gap-4">
-              <span className="col-span-2 text-center text-xs text-stone-400">Shop coming soon...</span>
-            </div>
-          </div>
-        );
+        return <ShopView onBack={() => setActiveApp('home')} onReward={(amount) => setGameState(prev => ({ ...prev, score: prev.score + amount }))} />;
+      case 'profile':
+        return <ProfileView onBack={() => setActiveApp('home')} />;
       case 'location':
         return (
           <div className="h-full flex flex-col relative overflow-hidden bg-[#81D4FA]">
@@ -537,6 +748,12 @@ const MobileInterface: React.FC<MobileInterfaceProps> = ({ messages, setMessages
                   color="#EDB7ED"
                   label="Social"
                   onClick={() => setActiveApp('social')}
+                />
+                <AppIcon
+                  icon={User}
+                  color="#A78BFA"
+                  label="Profile"
+                  onClick={() => setActiveApp('profile')}
                 />
               </div>
             </div>

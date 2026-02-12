@@ -1,4 +1,4 @@
-# medlhabit 🌱
+# MedLinkAI🌱
 > **Tagline**: Build Habits, Grow Your World.
 
 ## 1. The Problem

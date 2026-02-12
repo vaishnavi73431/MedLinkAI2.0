@@ -2,10 +2,16 @@
 export default {
     content: [
         "./index.html",
-        "./**/*.{js,ts,jsx,tsx}",
+        "./src/**/*.{js,ts,jsx,tsx}",
+        "./components/**/*.{js,ts,jsx,tsx}"
     ],
     theme: {
-        extend: {},
+        extend: {
+            fontFamily: {
+                display: ['var(--font-display)', 'monospace'],
+                body: ['var(--font-body)', 'sans-serif'],
+            },
+        },
     },
     plugins: [],
 }

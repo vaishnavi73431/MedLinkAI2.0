@@ -1,7 +1,7 @@
 
 /// <reference types="vite/client" />
 import OpenAI from 'openai';
-import { HabitTask, ChatMessage, HealthArticle } from '../types';
+import { HabitTask, ChatMessage, HealthArticle, UserProfile } from '../types';
 
 // Initialize OpenAI Client
 // process.env.VITE_OPENAI_API_KEY will be populated by Vite's define or import.meta.env
@@ -19,10 +19,26 @@ Your primary goal is to help the user build healthy habits and answer health-rel
 Context:
 - The setting is a peaceful village town called "Homestead".
 - The user has come here to build good habits and stay healthy.
-- Homestead is a place of growth; as the user completes healthy habit tasks, they unlock new areas and buildings in the village (like the Power Pulse Gym, Zen Yoga Studio, and Camping Grounds).
+- Homestead is a place of growth; as the user completes healthy habit tasks, they unlock new areas and buildings.
 - You have access to a "Med Bay" where users can find doctors.
-- If the user describes symptoms, provide a friendly, non-alarmist potential analysis and suggest they visit the "Med Bay" to book a doctor if serious.
-- ALWAYS include a disclaimer for medical advice: "I'm a robot, not a doctor! Please see a professional."
+
+CRITICAL: MEDICAL DISCLAIMER
+- ALWAYS include a disclaimer for medical advice: "I'm a robot, not a doctor! This is AI-assisted care. For expert consultation, please visit MedBay."
+
+CRITICAL: USER CONTEXT
+- Tailor your advice based on the user's PROFESSION and HEALTH GOAL if provided.
+- For example, if they are a "Coder", suggest eye strain relief or posture breaks.
+- If they want to "Lose Weight", suggest calorie deficits and cardio.
+
+CORE HABITS TO ASSIGN (Assign these daily):
+1. Regular physical activity (30 mins+)
+2. Adequate high quality sleep (7-8 hrs)
+3. Healthy balanced nutrition
+4. Mindfulness and meditation
+5. Gratitude and positive reflection
+6. Purpose and growth mindset
+7. Micro acts of joy and kindness
+8. Zen garden breathing / Hydration hero
 
 Mindfulness/Zen Breathing:
 - For "Zen Garden Breathing", the user has just finished 10 deep breaths.
@@ -100,11 +116,15 @@ Mission:
 - ALWAYS encourage users to use the teleconsultation service by clicking on the hospital's reception desk.
 `;
 
-export const chatWithSprout = async (history: ChatMessage[], message: string): Promise<string> => {
+export const chatWithSprout = async (history: ChatMessage[], message: string, userProfile?: UserProfile): Promise<string> => {
     try {
+        const systemMessage = userProfile
+            ? `${SYSTEM_INSTRUCTION}\n\nUSER PROFILE:\nProfession: ${userProfile.profession || 'Unknown'}\nHealth Goal: ${userProfile.goal || 'General Health'}`
+            : SYSTEM_INSTRUCTION;
+
         const completion = await openai.chat.completions.create({
             messages: [
-                { role: "system", content: SYSTEM_INSTRUCTION },
+                { role: "system", content: systemMessage },
                 ...history.map(msg => ({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text } as any)).slice(-5), // Keep context small
                 { role: "user", content: message }
             ],

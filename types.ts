@@ -83,6 +83,8 @@ export interface UserProfile {
   inventory: FurnitureItem[];
   placed_items: { id: string, item: FurnitureItem, x: number, y: number }[];
   removed_trees: number[];
+  goal?: string;
+  profession?: string;
   updated_at?: string;
 }
 

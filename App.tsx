@@ -63,6 +63,7 @@ const GLOBAL_BOT_MESSAGES = [
 const App: React.FC = () => {
   const [authStatus, setAuthStatus] = useState<'welcome' | 'login' | 'signup' | 'authenticated'>('welcome');
   const [currentView, setCurrentView] = useState<ViewState>('garden');
+  const [userProfile, setUserProfile] = useState<any>(null);
 
   // ... existing state declarations ...
 
@@ -197,12 +198,14 @@ const App: React.FC = () => {
               removedTrees: profile.removed_trees || []
             }));
             console.log("Loaded user profile:", profile);
+            setUserProfile(profile);
           } else {
             // Self-healing: Create profile if missing (e.g. old user)
             console.log("Profile missing. Creating new profile for existing user...");
             const { data: newProfile, error: createError } = await dataService.createProfile(session.user.id, session.user.email || 'User');
             if (newProfile) {
               console.log("Created missing profile:", newProfile);
+              setUserProfile(newProfile);
               // No need to setGameState here as it uses defaults, but future refreshes will work.
             } else {
               console.error("Failed to auto-create profile:", createError);
@@ -431,7 +434,13 @@ const App: React.FC = () => {
     }
 
     if (points > 0) addNotification(`+${points} Coins!`, 'coins');
-    if (levelUpOccurred) addNotification(`LEVEL UP! LVL ${newLevel}`, 'level');
+    if (levelUpOccurred) {
+      addNotification(`LEVEL UP! LVL ${newLevel}`, 'level');
+      // Trigger Achievement
+      if (userProfile?.full_name) {
+        dataService.createAchievement('level_up', `${userProfile.full_name} reached Level ${newLevel}!`);
+      }
+    }
 
     setGameState(prev => ({
       ...prev,

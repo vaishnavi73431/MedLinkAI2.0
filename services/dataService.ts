@@ -22,6 +22,7 @@ export const dataService = {
             .select()
             .single();
 
+
         if (error) {
             console.error('Error creating profile:', error);
             // If error is duplicate key, try to fetch instead (in case it was already created)
@@ -30,6 +31,9 @@ export const dataService = {
             }
             return { data: null, error };
         }
+
+        // Trigger "New User" Achievement
+        await this.createAchievement('new_user', `${fullName} just joined Homestead!`);
 
         return { data, error: null };
     },
@@ -225,5 +229,97 @@ export const dataService = {
             .select()
             .single();
         return { data, error };
+    },
+
+    // --- ACHIEVEMENTS ---
+    async getAchievements() {
+        const { data, error } = await supabase
+            .from('achievements')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .limit(50);
+        return { data, error };
+    },
+
+    async createAchievement(type: string, details: string) {
+        const { error } = await supabase
+            .from('achievements')
+            .insert({ type, details });
+        return { error };
+    },
+
+    // --- FRIENDS ---
+    async getFriends(userId: string) {
+        // Fetch friendships where user is requester OR receiver
+        const { data: sent, error: e1 } = await supabase
+            .from('friendships')
+            .select('receiver_id, status')
+            .eq('requester_id', userId);
+
+        const { data: received, error: e2 } = await supabase
+            .from('friendships')
+            .select('requester_id, status')
+            .eq('receiver_id', userId);
+
+        if (e1 || e2) return { data: [], error: e1 || e2 };
+
+        const friendIds = [
+            ...(sent?.map(f => f.receiver_id) || []),
+            ...(received?.map(f => f.requester_id) || [])
+        ];
+
+        if (friendIds.length === 0) return { data: [], error: null };
+
+        // Fetch profiles of friends
+        const { data: friends, error: e3 } = await supabase
+            .from('profiles')
+            .select('id, full_name, level')
+            .in('id', friendIds);
+
+        return { data: friends, error: e3 };
+    },
+
+    async addFriend(requesterId: string, receiverId: string) {
+        // Check if already friends
+        const { data: existing } = await supabase
+            .from('friendships')
+            .select('*')
+            .or(`and(requester_id.eq.${requesterId},receiver_id.eq.${receiverId}),and(requester_id.eq.${receiverId},receiver_id.eq.${requesterId})`)
+            .single();
+
+        if (existing) return { error: 'Already friends or request pending' };
+
+        const { error } = await supabase
+            .from('friendships')
+            .insert({ requester_id: requesterId, receiver_id: receiverId, status: 'accepted' }); // Auto-accept for now
+        return { error };
+    },
+
+    async getPotentialFriends(currentUserId: string) {
+        // accurate "potential friends" query is complex, for now just get last 10 active profiles
+        const { data, error } = await supabase
+            .from('profiles')
+            .select('id, full_name, level')
+            .neq('id', currentUserId)
+            .order('updated_at', { ascending: false })
+            .limit(10);
+        return { data, error };
+    },
+
+    // --- DIRECT MESSAGES ---
+    async getDirectMessages(userId: string, friendId: string) {
+        const { data, error } = await supabase
+            .from('direct_messages')
+            .select('*')
+            .or(`and(sender_id.eq.${userId},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${userId})`)
+            .order('created_at', { ascending: true });
+        return { data, error };
+    },
+
+    async sendDirectMessage(senderId: string, receiverId: string, text: string) {
+        const { error } = await supabase
+            .from('direct_messages')
+            .insert({ sender_id: senderId, receiver_id: receiverId, text });
+        return { error };
     }
 };

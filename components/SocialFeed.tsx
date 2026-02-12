@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Heart, MessageCircle, UserPlus, Send, Camera, MoreHorizontal, UserCheck, CheckCircle2, X } from 'lucide-react';
+import { Heart, MessageCircle, UserPlus, Send, Camera, MoreHorizontal, UserCheck, CheckCircle2, X, Trophy, Users, Newspaper, MessageSquare } from 'lucide-react';
 import { ChatMessage } from '../types';
 import { dataService } from '../services/dataService';
 import { authService } from '../services/authService';
@@ -25,54 +25,89 @@ interface Comment {
     text: string;
 }
 
+interface Friend {
+    id: string;
+    full_name: string;
+    level: number;
+}
+
+interface Achievement {
+    id: string;
+    type: string;
+    details: string;
+    created_at: string;
+}
+
+interface DirectMessage {
+    id: string;
+    sender_id: string;
+    text: string;
+    created_at: string;
+}
+
 interface SocialFeedProps {
     onBack: () => void;
 }
 
 const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
+    const [activeTab, setActiveTab] = useState<'feed' | 'friends' | 'achievements'>('feed');
+
+    // Data States
     const [posts, setPosts] = useState<Post[]>([]);
+    const [friends, setFriends] = useState<Friend[]>([]);
+    const [achievements, setAchievements] = useState<Achievement[]>([]);
+    const [potentialFriends, setPotentialFriends] = useState<Friend[]>([]);
+
+    // UI States
     const [loading, setLoading] = useState(true);
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
     const [currentUserProfile, setCurrentUserProfile] = useState<any>(null);
+    const [activeChatFriend, setActiveChatFriend] = useState<Friend | null>(null);
+    const [messages, setMessages] = useState<DirectMessage[]>([]);
+    const [newMessageText, setNewMessageText] = useState('');
 
-    const [friends, setFriends] = useState<string[]>([]);
+    // Post Creation
     const [newPostText, setNewPostText] = useState('');
     const [selectedImage, setSelectedImage] = useState<string | null>(null);
     const [selectedFile, setSelectedFile] = useState<File | null>(null);
-    const [activeCommentPost, setActiveCommentPost] = useState<string | null>(null);
+    const activeCommentPost = useRef<string | null>(null);
+    const [activeCommentPostId, setActiveCommentPostId] = useState<string | null>(null);
     const [commentText, setCommentText] = useState('');
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // Initial Load
     useEffect(() => {
-        const loadFeed = async () => {
-            setLoading(true);
-
-            // 1. Get User
+        const loadUser = async () => {
             const { session } = await authService.getSession();
-            if (!session?.user) {
-                setLoading(false);
-                return;
+            if (session?.user) {
+                setCurrentUserId(session.user.id);
+                const { data: profile } = await dataService.getProfile(session.user.id);
+                setCurrentUserProfile(profile);
+                loadTabContent(activeTab, session.user.id);
             }
-            setCurrentUserId(session.user.id);
-
-            // 2. Get Profile (for author info)
-            const { data: profile } = await dataService.getProfile(session.user.id);
-            setCurrentUserProfile(profile);
-
-            // 3. Get Feed
-            await refreshFeed(session.user.id);
-            setLoading(false);
         };
-        loadFeed();
-    }, []);
+        loadUser();
+    }, [activeTab]);
+
+    const loadTabContent = async (tab: string, userId: string) => {
+        setLoading(true);
+        if (tab === 'feed') {
+            await refreshFeed(userId);
+        } else if (tab === 'friends') {
+            const { data: friendsData } = await dataService.getFriends(userId);
+            setFriends(friendsData || []);
+            const { data: potential } = await dataService.getPotentialFriends(userId);
+            setPotentialFriends(potential || []);
+        } else if (tab === 'achievements') {
+            const { data: ach } = await dataService.getAchievements();
+            setAchievements(ach || []);
+        }
+        setLoading(false);
+    };
 
     const refreshFeed = async (userId: string) => {
         const { data: feedData, error } = await dataService.getSocialFeed();
-        if (error || !feedData) {
-            console.error("Failed to load feed", error);
-            return;
-        }
+        if (error || !feedData) return;
 
         const formattedPosts: Post[] = feedData.map((item: any) => ({
             id: item.id,
@@ -92,192 +127,202 @@ const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
             })) || [],
             timestamp: new Date(item.created_at).getTime()
         }));
-
         setPosts(formattedPosts);
     };
 
     const handleLike = async (postId: string) => {
         if (!currentUserId) return;
-
-        // Optimistic Update
-        setPosts(prev => prev.map(post => {
-            if (post.id === postId) {
-                return {
-                    ...post,
-                    likes: post.isLiked ? post.likes - 1 : post.likes + 1,
-                    isLiked: !post.isLiked
-                };
-            }
-            return post;
-        }));
-
-        const isLiked = posts.find(p => p.id === postId)?.isLiked;
-        if (isLiked) {
-            await dataService.unlikePost(currentUserId, postId);
-        } else {
-            await dataService.likePost(currentUserId, postId);
-        }
+        setPosts(prev => prev.map(p => p.id === postId ? { ...p, likes: p.isLiked ? p.likes - 1 : p.likes + 1, isLiked: !p.isLiked } : p));
+        const post = posts.find(p => p.id === postId);
+        if (post) toggleLike(post);
     };
 
-    const handleAddFriend = (authorName: string) => {
-        if (friends.includes(authorName)) {
-            setFriends(friends.filter(f => f !== authorName));
+    const toggleLike = async (post: Post) => {
+        if (!currentUserId) return;
+        if (post.isLiked) {
+            await dataService.unlikePost(currentUserId, post.id);
         } else {
-            setFriends([...friends, authorName]);
-        }
-    };
-
-    const handleImageSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.target.files?.[0];
-        if (file) {
-            setSelectedFile(file); // Keep file for upload
-            const reader = new FileReader();
-            reader.onloadend = () => {
-                setSelectedImage(reader.result as string);
-            };
-            reader.readAsDataURL(file);
+            await dataService.likePost(currentUserId, post.id);
         }
     };
 
     const handlePost = async () => {
         if ((!newPostText.trim() && !selectedImage) || !currentUserId || !currentUserProfile) return;
-
-        // Optimistic UI update (temporary)
-        const tempId = Date.now().toString();
-        const tempPost: Post = {
-            id: tempId,
-            author: {
-                name: currentUserProfile.full_name || 'You',
-                avatarColor: '#818CF8',
-                isBot: false
-            },
-            content: newPostText,
-            image: selectedImage || undefined,
-            likes: 0,
-            comments: [],
-            isLiked: false,
-            timestamp: Date.now()
-        };
-        setPosts([tempPost, ...posts]);
         setNewPostText('');
         setSelectedImage(null);
         setSelectedFile(null);
-
-        // Actual Save
-        const { error } = await dataService.createPost(
-            currentUserId,
-            currentUserProfile.full_name || 'You',
-            '#818CF8', // Default user color
-            newPostText,
-            selectedFile || undefined
-        );
-
-        if (error) {
-            alert("Failed to post: " + error.message);
-            // Revert on failure could be added here
-        } else {
-            // Refresh to get real ID and image URL
-            refreshFeed(currentUserId);
-        }
+        await dataService.createPost(currentUserId, currentUserProfile.full_name || 'You', '#818CF8', newPostText, selectedFile || undefined);
+        refreshFeed(currentUserId);
     };
 
     const handleComment = async (postId: string) => {
         if (!commentText.trim() || !currentUserId || !currentUserProfile) return;
-
-        // Optimistic Update
-        const tempComment = { id: Date.now().toString(), author: currentUserProfile.full_name || 'You', text: commentText };
-        setPosts(prev => prev.map(post => {
-            if (post.id === postId) {
-                return {
-                    ...post,
-                    comments: [...post.comments, tempComment]
-                };
-            }
-            return post;
-        }));
-
-        const textToSend = commentText;
+        const text = commentText;
         setCommentText('');
-        setActiveCommentPost(null);
-
-        await dataService.commentOnPost(currentUserId, postId, currentUserProfile.full_name || 'You', textToSend);
+        setActiveCommentPostId(null);
+        await dataService.commentOnPost(currentUserId, postId, currentUserProfile.full_name || 'You', text);
+        refreshFeed(currentUserId);
     };
+
+    const handleAddFriend = async (friendId: string) => {
+        if (!currentUserId) return;
+        await dataService.addFriend(currentUserId, friendId);
+        loadTabContent('friends', currentUserId);
+    };
+
+    // Chat Logic
+    const openChat = async (friend: Friend) => {
+        setActiveChatFriend(friend);
+        if (currentUserId) {
+            const { data } = await dataService.getDirectMessages(currentUserId, friend.id);
+            setMessages(data || []);
+        }
+    };
+
+    const sendMessage = async () => {
+        if (!newMessageText.trim() || !currentUserId || !activeChatFriend) return;
+        const text = newMessageText;
+        setNewMessageText('');
+        // Optimistic
+        setMessages(prev => [...prev, { id: 'temp-' + Date.now(), sender_id: currentUserId, text, created_at: new Date().toISOString() }]);
+
+        await dataService.sendDirectMessage(currentUserId, activeChatFriend.id, text);
+        // Refresh?
+        const { data } = await dataService.getDirectMessages(currentUserId, activeChatFriend.id);
+        setMessages(data || []);
+    };
+
+    // --- RENDER HELPERS ---
+
+    if (activeChatFriend) {
+        return (
+            <div className="h-full flex flex-col bg-stone-50">
+                <div className="bg-white p-4 border-b border-stone-200 flex items-center gap-4 sticky top-0 z-10">
+                    <button onClick={() => setActiveChatFriend(null)} className="p-2 hover:bg-stone-100 rounded-full">
+                        <X size={20} className="text-stone-600" />
+                    </button>
+                    <div className="flex-1">
+                        <h3 className="font-bold text-stone-800">{activeChatFriend.full_name}</h3>
+                        <p className="text-xs text-stone-400">Level {activeChatFriend.level}</p>
+                    </div>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 space-y-3 flex flex-col-reverse">
+                    <div className="flex flex-col gap-3 justify-end min-h-full">
+                        {messages.map((msg) => {
+                            const isMe = msg.sender_id === currentUserId;
+                            return (
+                                <div key={msg.id} className={`max-w-[80%] p-3 rounded-2xl text-sm ${isMe ? 'bg-purple-600 text-white self-end rounded-tr-sm' : 'bg-white border border-stone-200 text-stone-800 self-start rounded-tl-sm'}`}>
+                                    {msg.text}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+                <div className="p-3 bg-white border-t border-stone-200 flex gap-2">
+                    <input
+                        type="text"
+                        value={newMessageText}
+                        onChange={e => setNewMessageText(e.target.value)}
+                        placeholder="Type a message..."
+                        className="flex-1 bg-stone-50 border border-stone-200 rounded-full px-4 py-2 text-sm focus:outline-none focus:border-purple-300"
+                        onKeyDown={e => e.key === 'Enter' && sendMessage()}
+                    />
+                    <button onClick={sendMessage} className="p-2 bg-purple-600 text-white rounded-full hover:bg-purple-700">
+                        <Send size={18} />
+                    </button>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="h-full flex flex-col bg-stone-50">
-            {/* Header */}
-            <div className="bg-white p-4 border-b border-stone-200 shadow-sm flex items-center justify-between sticky top-0 z-10">
-                <h2 className="text-xl font-black bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent italic tracking-tighter">SocialSphere</h2>
-                <div className="flex gap-4">
+            {/* Header with Tabs */}
+            <div className="bg-white shadow-sm sticky top-0 z-10">
+                <div className="p-4 border-b border-stone-100 flex items-center justify-between">
+                    <h2 className="text-xl font-black bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent italic tracking-tighter">SocialSphere</h2>
                     <button onClick={onBack} className="p-2 hover:bg-stone-100 rounded-full">
                         <MoreHorizontal size={24} className="text-stone-400" />
                     </button>
                 </div>
+                <div className="flex">
+                    <button onClick={() => setActiveTab('feed')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${activeTab === 'feed' ? 'border-b-2 border-purple-600 text-purple-600' : 'text-stone-400'}`}>
+                        <Newspaper size={16} /> Feed
+                    </button>
+                    <button onClick={() => setActiveTab('friends')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${activeTab === 'friends' ? 'border-b-2 border-purple-600 text-purple-600' : 'text-stone-400'}`}>
+                        <Users size={16} /> Friends
+                    </button>
+                    <button onClick={() => setActiveTab('achievements')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${activeTab === 'achievements' ? 'border-b-2 border-purple-600 text-purple-600' : 'text-stone-400'}`}>
+                        <Trophy size={16} /> Awards
+                    </button>
+                </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto scrollbar-hide">
-                {/* Create Post */}
-                <div className="bg-white p-4 mb-2 border-b border-stone-100">
-                    <div className="flex gap-3">
-                        <div className="w-10 h-10 rounded-full bg-indigo-400 flex items-center justify-center flex-shrink-0 text-white font-bold">
-                            {(currentUserProfile?.full_name?.[0]) || 'Y'}
-                        </div>
-                        <div className="flex-1">
-                            <input
-                                type="text"
-                                placeholder="What's on your mind?"
-                                value={newPostText}
-                                onChange={(e) => setNewPostText(e.target.value)}
-                                className="w-full bg-stone-50 p-3 rounded-xl border border-stone-200 focus:outline-none focus:border-purple-300 transition-all text-sm mb-2"
-                            />
-                            {selectedImage && (
-                                <div className="relative w-full h-32 mb-2 rounded-lg overflow-hidden group">
-                                    <img src={selectedImage} alt="Preview" className="w-full h-full object-cover" />
-                                    <button
-                                        onClick={() => { setSelectedImage(null); setSelectedFile(null); }}
-                                        className="absolute top-1 right-1 bg-black/50 text-white p-1 rounded-full hover:bg-black/70"
-                                    >
-                                        <X size={12} />
-                                    </button>
+            <div className="flex-1 overflow-y-auto scrollbar-hide bg-stone-50">
+                {activeTab === 'feed' && (
+                    <div className="pb-20 space-y-4 pt-2">
+                        {/* Create Post */}
+                        <div className="bg-white p-4 mb-2 border-b border-stone-100">
+                            <div className="flex gap-3">
+                                <div className="w-10 h-10 rounded-full bg-indigo-400 flex items-center justify-center flex-shrink-0 text-white font-bold">
+                                    {(currentUserProfile?.full_name?.[0]) || 'Y'}
                                 </div>
-                            )}
-                            <div className="flex justify-between items-center">
-                                <input
-                                    type="file"
-                                    ref={fileInputRef}
-                                    onChange={handleImageSelect}
-                                    accept="image/*"
-                                    className="hidden"
-                                />
-                                <button
-                                    onClick={() => fileInputRef.current?.click()}
-                                    className="text-stone-400 hover:text-purple-500 transition-colors"
-                                >
-                                    <Camera size={20} />
-                                </button>
-                                <button
-                                    onClick={handlePost}
-                                    disabled={!newPostText.trim() && !selectedImage}
-                                    className="bg-purple-600 text-white px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider disabled:opacity-50"
-                                >
-                                    Post
-                                </button>
+                                <div className="flex-1">
+                                    <input
+                                        type="text"
+                                        placeholder="What's on your mind?"
+                                        value={newPostText}
+                                        onChange={(e) => setNewPostText(e.target.value)}
+                                        className="w-full bg-stone-50 p-3 rounded-xl border border-stone-200 focus:outline-none focus:border-purple-300 transition-all text-sm mb-2"
+                                    />
+                                    {selectedImage && (
+                                        <div className="relative w-full h-32 mb-2 rounded-lg overflow-hidden group">
+                                            <img src={selectedImage} alt="Preview" className="w-full h-full object-cover" />
+                                            <button
+                                                onClick={() => { setSelectedImage(null); setSelectedFile(null); }}
+                                                className="absolute top-1 right-1 bg-black/50 text-white p-1 rounded-full hover:bg-black/70"
+                                            >
+                                                <X size={12} />
+                                            </button>
+                                        </div>
+                                    )}
+                                    <div className="flex justify-between items-center">
+                                        <input
+                                            type="file"
+                                            ref={fileInputRef}
+                                            onChange={(e) => {
+                                                const file = e.target.files?.[0];
+                                                if (file) {
+                                                    setSelectedFile(file);
+                                                    const reader = new FileReader();
+                                                    reader.onloadend = () => setSelectedImage(reader.result as string);
+                                                    reader.readAsDataURL(file);
+                                                }
+                                            }}
+                                            accept="image/*"
+                                            className="hidden"
+                                        />
+                                        <button
+                                            onClick={() => fileInputRef.current?.click()}
+                                            className="text-stone-400 hover:text-purple-500 transition-colors"
+                                        >
+                                            <Camera size={20} />
+                                        </button>
+                                        <button
+                                            onClick={handlePost}
+                                            disabled={!newPostText.trim() && !selectedImage}
+                                            className="bg-purple-600 text-white px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider disabled:opacity-50"
+                                        >
+                                            Post
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                </div>
 
-                {/* Feed */}
-                <div className="pb-20 space-y-4">
-                    {loading ? (
-                        <div className="p-8 text-center text-stone-400 text-xs font-bold uppercase tracking-widest">Loading Feed...</div>
-                    ) : (
-                        posts.length === 0 ? (
-                            <div className="p-8 text-center text-stone-400 text-xs font-bold uppercase tracking-widest">No posts yet. Be the first!</div>
-                        ) : (
+                        {loading ? <div className="p-8 text-center text-stone-400 text-xs font-bold uppercase tracking-widest">Loading...</div> :
                             posts.map(post => (
                                 <div key={post.id} className="bg-white border-b border-stone-100 pb-2">
-                                    {/* Post Header */}
                                     <div className="p-3 flex items-center justify-between">
                                         <div className="flex items-center gap-3">
                                             <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold shadow-sm" style={{ backgroundColor: post.author.avatarColor }}>
@@ -293,32 +338,7 @@ const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
                                                 </span>
                                             </div>
                                         </div>
-                                        {!post.author.isBot && post.author.name !== (currentUserProfile?.full_name) && (
-                                            <button
-                                                onClick={() => handleAddFriend(post.author.name)}
-                                                className={`p-2 rounded-full transition-all ${friends.includes(post.author.name)
-                                                        ? 'bg-green-100 text-green-600'
-                                                        : 'bg-stone-50 text-stone-400 hover:bg-purple-50 hover:text-purple-500'
-                                                    }`}
-                                            >
-                                                {friends.includes(post.author.name) ? <UserCheck size={18} /> : <UserPlus size={18} />}
-                                            </button>
-                                        )}
-                                        {/* Allow friending bots too if user wants */}
-                                        {post.author.isBot && (
-                                            <button
-                                                onClick={() => handleAddFriend(post.author.name)}
-                                                className={`p-2 rounded-full transition-all ${friends.includes(post.author.name)
-                                                        ? 'bg-green-100 text-green-600'
-                                                        : 'bg-stone-50 text-stone-400 hover:bg-purple-50 hover:text-purple-500'
-                                                    }`}
-                                            >
-                                                {friends.includes(post.author.name) ? <UserCheck size={18} /> : <UserPlus size={18} />}
-                                            </button>
-                                        )}
                                     </div>
-
-                                    {/* Content */}
                                     <div className="px-4 py-2">
                                         <p className="text-stone-800 text-sm leading-relaxed mb-2">{post.content}</p>
                                         {post.image && (
@@ -327,28 +347,17 @@ const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
                                             </div>
                                         )}
                                     </div>
-
-                                    {/* Actions */}
                                     <div className="px-4 py-3 flex items-center gap-6">
-                                        <button
-                                            onClick={() => handleLike(post.id)}
-                                            className={`flex items-center gap-1.5 group ${post.isLiked ? 'text-red-500' : 'text-stone-400 hover:text-stone-600'}`}
-                                        >
+                                        <button onClick={() => toggleLike(post)} className={`flex items-center gap-1.5 group ${post.isLiked ? 'text-red-500' : 'text-stone-400 hover:text-stone-600'}`}>
                                             <Heart size={22} className={`transition-transform group-active:scale-125 ${post.isLiked ? 'fill-current' : ''}`} />
                                             <span className="text-xs font-bold">{post.likes}</span>
                                         </button>
-
-                                        <button
-                                            onClick={() => setActiveCommentPost(activeCommentPost === post.id ? null : post.id)}
-                                            className="flex items-center gap-1.5 text-stone-400 hover:text-stone-600"
-                                        >
+                                        <button onClick={() => setActiveCommentPostId(activeCommentPostId === post.id ? null : post.id)} className="flex items-center gap-1.5 text-stone-400 hover:text-stone-600">
                                             <MessageCircle size={22} />
                                             <span className="text-xs font-bold">{post.comments.length}</span>
                                         </button>
                                     </div>
-
-                                    {/* Comments Section */}
-                                    {(activeCommentPost === post.id || post.comments.length > 0) && (
+                                    {(activeCommentPostId === post.id || post.comments.length > 0) && (
                                         <div className="px-4 pb-3">
                                             {post.comments.map(comment => (
                                                 <div key={comment.id} className="mb-2 text-xs">
@@ -356,32 +365,97 @@ const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
                                                     <span className="text-stone-600">{comment.text}</span>
                                                 </div>
                                             ))}
-                                            {activeCommentPost === post.id && (
+                                            {activeCommentPostId === post.id && (
                                                 <div className="flex gap-2 mt-3 pt-2 border-t border-stone-100">
-                                                    <input
-                                                        type="text"
-                                                        placeholder="Add a comment..."
-                                                        value={commentText}
-                                                        onChange={(e) => setCommentText(e.target.value)}
-                                                        onKeyDown={(e) => e.key === 'Enter' && handleComment(post.id)}
-                                                        className="flex-1 bg-stone-50 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-purple-200"
-                                                        autoFocus
-                                                    />
-                                                    <button
-                                                        onClick={() => handleComment(post.id)}
-                                                        className="text-purple-600 font-bold text-xs"
-                                                    >
-                                                        Post
-                                                    </button>
+                                                    <input type="text" placeholder="Add a comment..." value={commentText} onChange={e => setCommentText(e.target.value)} onKeyDown={e => e.key === 'Enter' && handleComment(post.id)} className="flex-1 bg-stone-50 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-purple-200" autoFocus />
+                                                    <button onClick={() => handleComment(post.id)} className="text-purple-600 font-bold text-xs">Post</button>
                                                 </div>
                                             )}
                                         </div>
                                     )}
                                 </div>
-                            ))
-                        )
-                    )}
-                </div>
+                            ))}
+                    </div>
+                )}
+
+                {activeTab === 'friends' && (
+                    <div className="p-4 space-y-6">
+                        {loading && <div className="text-center text-stone-400 text-xs font-bold uppercase tracking-widest">Loading Friends...</div>}
+
+                        {/* My Friends List */}
+                        <div>
+                            <h3 className="text-xs font-bold text-stone-500 uppercase tracking-widest mb-3">My Friends ({friends.length})</h3>
+                            <div className="space-y-3">
+                                {friends.length === 0 ? (
+                                    <div className="text-sm text-stone-400 italic">No friends yet. Add some below!</div>
+                                ) : (
+                                    friends.map(friend => (
+                                        <div key={friend.id} className="bg-white p-3 rounded-xl border border-stone-200 flex items-center justify-between shadow-sm">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center font-bold">
+                                                    {friend.full_name[0]}
+                                                </div>
+                                                <div>
+                                                    <h4 className="font-bold text-stone-800 text-sm">{friend.full_name}</h4>
+                                                    <span className="text-xs text-stone-400">Level {friend.level}</span>
+                                                </div>
+                                            </div>
+                                            <button onClick={() => openChat(friend)} className="p-2 bg-stone-100 rounded-full text-stone-600 hover:bg-stone-200">
+                                                <MessageSquare size={18} />
+                                            </button>
+                                        </div>
+                                    ))
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Suggestions */}
+                        <div>
+                            <h3 className="text-xs font-bold text-stone-500 uppercase tracking-widest mb-3">Community Members</h3>
+                            <div className="space-y-3">
+                                {potentialFriends.map(pf => {
+                                    const isFriend = friends.some(f => f.id === pf.id);
+                                    if (isFriend) return null;
+                                    return (
+                                        <div key={pf.id} className="bg-white p-3 rounded-xl border border-stone-200 flex items-center justify-between shadow-sm opacity-80">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 rounded-full bg-stone-100 text-stone-400 flex items-center justify-center font-bold">
+                                                    {pf.full_name[0]}
+                                                </div>
+                                                <div>
+                                                    <h4 className="font-bold text-stone-800 text-sm">{pf.full_name}</h4>
+                                                    <span className="text-xs text-stone-400">Level {pf.level}</span>
+                                                </div>
+                                            </div>
+                                            <button onClick={() => handleAddFriend(pf.id)} className="text-xs font-bold text-blue-600 uppercase tracking-wider px-3 py-1 bg-blue-50 rounded-full">
+                                                + Add
+                                            </button>
+                                        </div>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {activeTab === 'achievements' && (
+                    <div className="p-4 space-y-4">
+                        {loading && <div className="text-center text-stone-400 text-xs font-bold uppercase tracking-widest">Loading Awards...</div>}
+                        {achievements.map((ach) => (
+                            <div key={ach.id} className="bg-white p-3 rounded-xl border-l-4 border-yellow-400 shadow-sm flex items-start gap-3">
+                                <div className="mt-1">
+                                    {ach.type === 'level_up' ? <Trophy size={18} className="text-yellow-500" /> : <UserPlus size={18} className="text-blue-500" />}
+                                </div>
+                                <div>
+                                    <p className="text-sm font-bold text-stone-800">{ach.details}</p>
+                                    <p className="text-[10px] text-stone-400 uppercase tracking-wider mt-1">
+                                        {new Date(ach.created_at).toLocaleDateString()}
+                                    </p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
         </div>
     );
