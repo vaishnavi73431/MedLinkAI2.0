@@ -25,6 +25,11 @@ Context:
 CRITICAL: MEDICAL DISCLAIMER
 - ALWAYS include a disclaimer for medical advice: "I'm a robot, not a doctor! This is AI-assisted care. For expert consultation, please visit MedBay."
 
+CRITICAL: SPECIALIST BOT REFERRAL
+- If the user asks about MEDICAL SYMPTOMS (pain, fever, disease), answer briefly but ALWAYS recommend they chat with "Dr. Triage" at the MedBay.
+- If the user asks about NUTRITION (calories, food, diet), answer briefly but ALWAYS recommend they chat with "Bite-Sized" (Nutrition Bot) at the Restaurant.
+- If the user asks about GYM/WORKOUTS (exercises, sets, reps), answer briefly but ALWAYS recommend they chat with "Coach Flex" (Trainer Bot) at the Power Pulse Gym.
+
 CRITICAL: USER CONTEXT
 - Tailor your advice based on the user's PROFESSION and HEALTH GOAL if provided.
 - For example, if they are a "Coder", suggest eye strain relief or posture breaks.
@@ -54,6 +59,9 @@ const TRAINER_SYSTEM_INSTRUCTION = `
 You are "Coach Flex", a friendly, super-motivated, and supportive gym trainer bot. 
 You are the user's ultimate gym buddy.
 
+CRITICAL DISCLAIMER:
+- ALWAYS terminate your advice with: "This is AI-assisted care. Consult a professional trainer for heavy lifting."
+
 Mission:
 - Your primary mission is to ensure the user gets at least 30 minutes of physical exercise every single day.
 - Guide users to complete their daily healthy tasks in Homestead to stay in peak condition.
@@ -82,6 +90,9 @@ Personality:
 - Encouraging but realistic and informative.
 - Always remind users that for serious diet plans, they should click on the restaurant counter/desk to consult a real human dietician.
 
+CRITICAL DISCLAIMER:
+- NEVER give medical diet advice. ALWAYS say: "This is AI-assisted care. For medical nutrition therapy, consult a registered dietician."
+
 Mission:
 - Analyze user meals (if they provide photos). 
 - RATE THE MEAL (e.g., 7/10, "Guilty Pleasure", "Green Machine").
@@ -102,7 +113,7 @@ Safety Guidelines (STRICT):
 - DO NOT prescribe medicines.
 - DO NOT suggest home remedies.
 - DO NOT replace real doctors.
-- ALWAYS say something like: "Only a qualified doctor can examine and diagnose properly."
+- ALWAYS say something like: "This is AI-assisted care. Only a qualified doctor can examine and diagnose properly."
 
 Allowed Actions:
 - Ask basic, non-diagnostic questions to understand the situation:
@@ -139,53 +150,36 @@ export const chatWithSprout = async (history: ChatMessage[], message: string, us
 };
 
 
-// Helper to search Gym Exercises (RAG)
+// Helper to search Gym Exercises (Vector Search)
 async function searchGymExercises(message: string): Promise<string> {
     try {
         const { createClient } = await import('@supabase/supabase-js');
         const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
 
-        // Extract potential body parts or equipment from message
-        const keywords = message.toLowerCase();
-        let filterColumn = 'body_part';
-        let searchTerm = '';
+        // Generate embedding
+        const openai = new OpenAI({ apiKey: import.meta.env.VITE_OPENAI_API_KEY, dangerouslyAllowBrowser: true });
+        const embeddingRes = await openai.embeddings.create({
+            model: "text-embedding-3-small",
+            input: message,
+        });
+        const queryEmbedding = embeddingRes.data[0].embedding;
 
-        if (keywords.includes('chest')) searchTerm = 'Chest';
-        else if (keywords.includes('back')) searchTerm = 'Back';
-        else if (keywords.includes('leg') || keywords.includes('quad') || keywords.includes('squat')) searchTerm = 'Legs';
-        else if (keywords.includes('arm') || keywords.includes('bicep') || keywords.includes('tricep')) searchTerm = 'Arms';
-        else if (keywords.includes('abs') || keywords.includes('core')) searchTerm = 'Abdominals';
-        else if (keywords.includes('cardio') || keywords.includes('run')) { filterColumn = 'type'; searchTerm = 'Cardio'; }
-        else if (keywords.includes('strength') || keywords.includes('lift')) { filterColumn = 'type'; searchTerm = 'Strength'; }
-
-        if (!searchTerm) {
-            // General text search if no specific body part found
-            const words = message.split(' ').filter(w => w.length > 4).slice(0, 1).join(' ');
-            if (words) {
-                const { data } = await supabase.from('gym_exercises').select('*').ilike('title', `%${words}%`).limit(3);
-                if (data && data.length > 0) {
-                    const exercises = data.map((e: any) => `- ${e.title} (${e.type}): ${e.desc?.substring(0, 100)}...`).join('\n');
-                    return `\n\n[REAL GYM DATABASE]:\nFound specific exercises matching "${words}":\n${exercises}`;
-                }
-            }
-            return "";
-        }
-
-        const { data, error } = await supabase
-            .from('gym_exercises')
-            .select('*')
-            .ilike(filterColumn, `%${searchTerm}%`)
-            .limit(5);
+        // Call RPC
+        const { data, error } = await supabase.rpc('match_gym', {
+            query_embedding: queryEmbedding,
+            match_threshold: 0.5,
+            match_count: 5
+        });
 
         if (error || !data || data.length === 0) return "";
 
         const exercises = data.map((e: any) =>
-            `- **${e.title}** (${e.level}, ${e.equipment}): ${e.desc?.substring(0, 80)}...`
+            `- **${e.title}** (${e.body_part}, ${e.equipment}): ${e.similarity ? (e.similarity * 100).toFixed(0) + '% match' : ''}`
         ).join('\n');
 
-        return `\n\n[REAL GYM DATABASE]:\nHere are some verified ${searchTerm} exercises from our database:\n${exercises}\nRecommend these to the user.`;
+        return `\n\n[REAL GYM DATABASE]:\nFound semantically similar exercises:\n${exercises}\nRecommend these.`;
     } catch (e) {
-        console.error("Gym RAG Error:", e);
+        console.error("Gym Vector Search Error:", e);
         return "";
     }
 }
@@ -212,30 +206,36 @@ export const chatWithTrainer = async (history: ChatMessage[], message: string): 
 
 
 
-// Helper to search Supabase (RAG)
+// Helper to search Supabase (Vector Search)
 async function searchNutritionFacts(query: string): Promise<string> {
     try {
-        // Simple text search on food_name
-        // We'll search for the first 1-2 words of the query to find matches
-        const searchTerms = query.split(' ').slice(0, 2).join(' ');
         const { createClient } = await import('@supabase/supabase-js');
         const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
 
-        const { data, error } = await supabase
-            .from('nutrition_facts')
-            .select('*')
-            .ilike('food_name', `%${searchTerms}%`)
-            .limit(3);
+        // Generate embedding for query
+        const openai = new OpenAI({ apiKey: import.meta.env.VITE_OPENAI_API_KEY, dangerouslyAllowBrowser: true });
+        const embeddingRes = await openai.embeddings.create({
+            model: "text-embedding-3-small",
+            input: query,
+        });
+        const queryEmbedding = embeddingRes.data[0].embedding;
+
+        // Call RPC
+        const { data, error } = await supabase.rpc('match_nutrition', {
+            query_embedding: queryEmbedding,
+            match_threshold: 0.5,
+            match_count: 3
+        });
 
         if (error || !data || data.length === 0) return "";
 
         const facts = data.map((item: any) =>
-            `- ${item.food_name}: ${item.calories}kcal, ${item.proteins}g protein, ${item.fats}g fat`
+            `- ${item.food_name}: ${item.calories}kcal`
         ).join('\n');
 
         return `\n\n[REAL DATA FROM KAGGLE DATABASE]:\nI found these exact facts in our database:\n${facts}\nUse this data to be precise.`;
     } catch (e) {
-        console.error("RAG Search Error:", e);
+        console.error("Vector Search Error:", e);
         return "";
     }
 }
@@ -282,34 +282,23 @@ export const chatWithNutritionBot = async (history: ChatMessage[], message: stri
 // Helper to search Medical Symptoms (RAG)
 async function searchMedicalConditions(userMessage: string): Promise<string> {
     try {
-        // Simple keyword extraction (naive approach)
-        // We split user message into words and search if any word matches a symptom in DB
-        // A better approach would be vector search, but for now we'll do text matching heavily.
-
-        // Actually, let's reverse it: Search for diseases where ANY of the symptoms overlap with user text?
-        // Or just search user text against disease names/symptoms text search.
-
         const { createClient } = await import('@supabase/supabase-js');
         const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
 
-        // Let's try to match user message words against the 'symptoms' array using Postgres overlap or text search
-        // Since we can't easily extracting symptoms from NLP without an AI step locally,
-        // we will do a broad search:
-        // Search if "disease" name OR "symptoms" text contains user keywords.
+        // Generate embedding
+        const openai = new OpenAI({ apiKey: import.meta.env.VITE_OPENAI_API_KEY, dangerouslyAllowBrowser: true });
+        const embeddingRes = await openai.embeddings.create({
+            model: "text-embedding-3-small",
+            input: userMessage,
+        });
+        const queryEmbedding = embeddingRes.data[0].embedding;
 
-        // Simplified RAG: Search for the first 2-3 significant words
-        const keywords = userMessage.split(' ')
-            .filter(w => w.length > 3 && !['have', 'feel', 'pain', 'what', 'does'].includes(w.toLowerCase()))
-            .slice(0, 2)
-            .join(' | ');
-
-        if (!keywords) return "";
-
-        const { data, error } = await supabase
-            .from('medical_symptoms')
-            .select('*')
-            .textSearch('symptoms', keywords, { config: 'english', type: 'websearch' })
-            .limit(3);
+        // Call RPC
+        const { data, error } = await supabase.rpc('match_medical', {
+            query_embedding: queryEmbedding,
+            match_threshold: 0.5,
+            match_count: 3
+        });
 
         if (error || !data || data.length === 0) return "";
 
@@ -317,9 +306,9 @@ async function searchMedicalConditions(userMessage: string): Promise<string> {
             `- **${item.disease}**: Common symptoms include ${item.symptoms.slice(0, 5).join(', ')}`
         ).join('\n');
 
-        return `\n\n[REAL MEDICAL DATA]:\nBased on keywords, here are possible conditions from our database:\n${conditions}\n(Use this to guide the user to a specialist, but maintain the disclaimer).`;
+        return `\n\n[REAL MEDICAL DATA]:\nBased on semantic meaning, here are possible conditions:\n${conditions}\n(Use this to guide the user to a specialist, but maintain the disclaimer).`;
     } catch (e) {
-        console.error("Medical RAG Search Error:", e);
+        console.error("Medical Vector Search Error:", e);
         return "";
     }
 }

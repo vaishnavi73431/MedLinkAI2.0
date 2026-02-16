@@ -19,6 +19,7 @@ import TrainerChat from './components/TrainerChat';
 import NutritionChat from './components/NutritionChat';
 import DoctorChat from './components/DoctorChat';
 import GlobalChat from './components/GlobalChat';
+
 import { GameState, HabitTask, ChatMessage, ViewState, FurnitureItem, ZoneType, Reminder } from './types';
 import { authService } from './services/authService';
 import { dataService } from './services/dataService';
@@ -1648,7 +1649,10 @@ const App: React.FC = () => {
 
         {/* AUTHENTICATION FLOW */}
         {authStatus === 'welcome' && (
-          <WelcomeScreen onLogin={() => setAuthStatus('login')} onSignup={() => setAuthStatus('signup')} />
+          <WelcomeScreen
+            onLogin={() => setAuthStatus('login')}
+            onSignup={() => setAuthStatus('signup')}
+          />
         )}
 
         {(authStatus === 'login' || authStatus === 'signup') && (
