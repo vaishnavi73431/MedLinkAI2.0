@@ -8,7 +8,7 @@ Building healthy habits is hard.
 - **Loneliness**: Self-improvement often feels like a solitary grind.
 
 ## 2. The Solution: Gamified "Twin-World"
-Tuski differs by mirroring your internal state into an external, visual world.
+MedLinkAIdiffers by mirroring your internal state into an external, visual world.
 - **Visual Feedback**: You don't just "log" water; you water your digital garden. If you neglect your health, your garden withers.
 - **Immediate Companionship**: "Sprout" (your AI companion) and other NPCs (Dr. Triage, Coach Flex) provide instant social feedback.
 - **Progression**: Unlocking new zones (Gym, Restaurant, Camping) gives a tangible sense of "leveling up" in life.

@@ -3,6 +3,12 @@
 import OpenAI from 'openai';
 import { HabitTask, ChatMessage, HealthArticle, UserProfile } from '../types';
 
+// Message interface for OpenAI chat
+interface Message {
+    role: 'system' | 'user' | 'assistant';
+    content: string;
+}
+
 // Initialize OpenAI Client
 // process.env.VITE_OPENAI_API_KEY will be populated by Vite's define or import.meta.env
 const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
@@ -362,6 +368,37 @@ export const generateTasks = async (score: number, context: string): Promise<Hab
         return [];
     }
 };
+
+export class OpenAIClient {
+    private client: OpenAI;
+
+    constructor(apiKey: string) {
+        this.client = new OpenAI({ apiKey, dangerouslyAllowBrowser: true });
+    }
+
+    async chat(botId: string, messages: Message[]): Promise<string> {
+        try {
+            // Use fine-tuned model for Chef Nourish (nutrition bot)
+            const model = botId === 'chef-nourish' && import.meta.env.VITE_NUTRITION_MODEL
+                ? import.meta.env.VITE_NUTRITION_MODEL
+                : 'gpt-3.5-turbo';
+
+            const response = await this.client.chat.completions.create({
+                model: model,
+                messages: messages.map(msg => ({
+                    role: msg.role,
+                    content: msg.content
+                })),
+                temperature: 0.7,
+                max_tokens: 500
+            });
+            return response.choices[0].message.content || "";
+        } catch (error) {
+            console.error(`Chat with ${botId} Error:`, error);
+            return "I'm having trouble responding right now.";
+        }
+    }
+}
 
 export const verifyTaskCompletion = async (taskTitle: string, imageBase64: string, isIoT: boolean): Promise<{ verified: boolean; message: string }> => {
     try {
