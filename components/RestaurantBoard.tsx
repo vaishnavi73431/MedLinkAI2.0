@@ -7,9 +7,10 @@ import { X, MapPin, Utensils, Sparkles, Loader2, Coins, ExternalLink, Navigation
 interface RestaurantBoardProps {
   isOpen: boolean;
   onClose: (rewardEarned: boolean) => void;
+  onAddRestaurantXP: (amount: number) => void;
 }
 
-const RestaurantBoard: React.FC<RestaurantBoardProps> = ({ isOpen, onClose }) => {
+const RestaurantBoard: React.FC<RestaurantBoardProps> = ({ isOpen, onClose, onAddRestaurantXP }) => {
   const [restaurants, setRestaurants] = useState<HealthArticle[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -18,6 +19,7 @@ const RestaurantBoard: React.FC<RestaurantBoardProps> = ({ isOpen, onClose }) =>
   useEffect(() => {
     if (isOpen) {
       getLocationAndFetch();
+      setHasVisitedLink(false); // Reset reward state on open
     }
   }, [isOpen]);
 
@@ -142,10 +144,13 @@ const RestaurantBoard: React.FC<RestaurantBoardProps> = ({ isOpen, onClose }) =>
           </div>
           {hasVisitedLink && (
             <button
-              onClick={() => onClose(true)}
+              onClick={() => {
+                onClose(true);
+                onAddRestaurantXP(30);
+              }}
               className="w-full mt-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black py-3 rounded-xl border-b-4 border-emerald-800 active:border-b-0 active:translate-y-1 transition-all uppercase text-sm tracking-widest shadow-xl"
             >
-              Claim Diner Reward
+              Claim Diner Reward (+30 XP)
             </button>
           )}
         </div>

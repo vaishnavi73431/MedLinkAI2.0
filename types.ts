@@ -46,6 +46,10 @@ export interface GameState {
   unlockedZones: ZoneType[];
   removedTrees: number[];
   reminders: Reminder[];
+  restaurantXP: number;
+  restaurantLevel: number;
+  streak: number;
+  lastCompletedDate: string | null;
 }
 
 export interface Achievement {
@@ -83,6 +87,10 @@ export interface UserProfile {
   inventory: FurnitureItem[];
   placed_items: { id: string, item: FurnitureItem, x: number, y: number }[];
   removed_trees: number[];
+  restaurant_xp?: number;
+  restaurant_level?: number;
+  streak_count?: number;
+  last_completed_date?: string;
   goal?: string;
   profession?: string;
   updated_at?: string;

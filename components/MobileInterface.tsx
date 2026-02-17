@@ -14,10 +14,11 @@ interface MobileInterfaceProps {
   gameState: GameState;
   setGameState: React.Dispatch<React.SetStateAction<GameState>>;
   initialApp?: 'home' | 'chat' | 'location' | 'shopping' | 'newsletter';
-  onVisitGym?: () => void;
-  onVisitRestaurant?: () => void;
-  onVisitHospital?: () => void;
-  onVisitSevaHub?: () => void;
+  onVisitGym: () => void;
+  onVisitRestaurant: () => void;
+  onVisitHospital: () => void;
+  onVisitSevaHub: () => void;
+  onAddRestaurantXP: (amount: number) => void;
 }
 
 type AppId = 'home' | 'chat' | 'location' | 'shopping' | 'newsletter' | 'social' | 'profile';
@@ -115,21 +116,22 @@ const ProfileView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   );
 };
 
-const ShopView: React.FC<{ onBack: () => void; onReward: (amount: number) => void }> = ({ onBack, onReward }) => {
+const ShopView: React.FC<{ onBack: () => void; onReward: (amount: number) => void; onAddRestaurantXP: (amount: number) => void }> = ({ onBack, onReward, onAddRestaurantXP }) => {
   const [waitingForReward, setWaitingForReward] = useState(false);
 
   useEffect(() => {
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible' && waitingForReward) {
         onReward(50);
+        onAddRestaurantXP(15);
         setWaitingForReward(false);
-        alert("Welcome back! You earned 50 coins for exploring healthy options! 🪙");
+        alert("Welcome back! You earned 50 coins and 15 Diner XP for exploring healthy options! 🪙🍳");
       }
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
     return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
-  }, [waitingForReward, onReward]);
+  }, [waitingForReward, onReward, onAddRestaurantXP]);
 
   const handleProductClick = (url: string) => {
     setWaitingForReward(true);
@@ -253,7 +255,7 @@ const NewsView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   );
 };
 
-const MobileInterface: React.FC<MobileInterfaceProps> = ({ messages, setMessages, gameState, setGameState, initialApp = 'home', onVisitGym, onVisitRestaurant, onVisitHospital, onVisitSevaHub }) => {
+const MobileInterface: React.FC<MobileInterfaceProps> = ({ messages, setMessages, gameState, setGameState, initialApp = 'home', onVisitGym, onVisitRestaurant, onVisitHospital, onVisitSevaHub, onAddRestaurantXP }) => {
   const [activeApp, setActiveApp] = useState<AppId>(initialApp);
   const [mapOffset, setMapOffset] = useState({ x: 0, y: 0 });
   const [isDraggingMap, setIsDraggingMap] = useState(false);
@@ -584,7 +586,50 @@ const MobileInterface: React.FC<MobileInterfaceProps> = ({ messages, setMessages
     ctx.fill();
     ctx.stroke();
 
-  }, []);
+    // Level Badge
+    if (gameState.restaurantLevel && gameState.restaurantLevel > 0) {
+      const badgeX = resX + rW / 2 + 10;
+      const badgeY = resY - rH / 2 - 10;
+
+      // Star shape background
+      ctx.fillStyle = '#FFD700'; // Gold
+      ctx.strokeStyle = '#F57F17';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const spikes = 5;
+      const outerRadius = 12;
+      const innerRadius = 6;
+      let rot = Math.PI / 2 * 3;
+      let x = badgeX;
+      let y = badgeY;
+      const step = Math.PI / spikes;
+
+      ctx.moveTo(badgeX, badgeY - outerRadius);
+      for (let i = 0; i < spikes; i++) {
+        x = badgeX + Math.cos(rot) * outerRadius;
+        y = badgeY + Math.sin(rot) * outerRadius;
+        ctx.lineTo(x, y);
+        rot += step;
+
+        x = badgeX + Math.cos(rot) * innerRadius;
+        y = badgeY + Math.sin(rot) * innerRadius;
+        ctx.lineTo(x, y);
+        rot += step;
+      }
+      ctx.lineTo(badgeX, badgeY - outerRadius);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+
+      // Text
+      ctx.fillStyle = '#000000';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(gameState.restaurantLevel.toString(), badgeX, badgeY + 1);
+    }
+
+  }, [gameState.restaurantLevel]);
 
   useEffect(() => {
     if (activeApp === 'location' && canvasRef.current) {
@@ -614,18 +659,15 @@ const MobileInterface: React.FC<MobileInterfaceProps> = ({ messages, setMessages
       case 'newsletter':
         return <NewsView onBack={() => setActiveApp('home')} />;
       case 'shopping':
-        return <ShopView onBack={() => setActiveApp('home')} onReward={(amount) => setGameState(prev => ({ ...prev, score: prev.score + amount }))} />;
+        return <ShopView onBack={() => setActiveApp('home')} onReward={(amount) => setGameState(prev => ({ ...prev, score: prev.score + amount }))} onAddRestaurantXP={onAddRestaurantXP} />;
       case 'profile':
         return <ProfileView onBack={() => setActiveApp('home')} />;
       case 'location':
         return (
           <div className="h-full flex flex-col relative overflow-hidden bg-[#81D4FA]">
             <div className="absolute top-0 left-0 w-full z-20 p-4 flex items-center justify-between pointer-events-none">
-              <button
-                onClick={() => setActiveApp('home')}
-                className="p-2 bg-white/80 backdrop-blur-sm rounded-full shadow-md border border-white/40 pointer-events-auto active:scale-95 transition-transform"
-              >
-                <ChevronLeft size={20} className="text-stone-600" />
+              <button onClick={() => setActiveApp('home')} className="p-4 -ml-2 hover:bg-stone-200 rounded-full transition-colors">
+                <ChevronLeft size={24} className="text-stone-600" />
               </button>
             </div>
             <div

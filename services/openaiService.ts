@@ -215,9 +215,6 @@ export const chatWithTrainer = async (history: ChatMessage[], message: string): 
 // Helper to search Supabase (Vector Search)
 async function searchNutritionFacts(query: string): Promise<string> {
     try {
-        const { createClient } = await import('@supabase/supabase-js');
-        const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
-
         // Generate embedding for query
         const openai = new OpenAI({ apiKey: import.meta.env.VITE_OPENAI_API_KEY, dangerouslyAllowBrowser: true });
         const embeddingRes = await openai.embeddings.create({
@@ -226,8 +223,11 @@ async function searchNutritionFacts(query: string): Promise<string> {
         });
         const queryEmbedding = embeddingRes.data[0].embedding;
 
-        // Call RPC
-        const { data, error } = await supabase.rpc('match_nutrition', {
+        // Call DataService which calls Supabase RPC
+        const { createClient } = await import('@supabase/supabase-js');
+        const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
+
+        const { data, error } = await supabase.rpc('match_nutrition_facts', {
             query_embedding: queryEmbedding,
             match_threshold: 0.5,
             match_count: 3
@@ -236,10 +236,10 @@ async function searchNutritionFacts(query: string): Promise<string> {
         if (error || !data || data.length === 0) return "";
 
         const facts = data.map((item: any) =>
-            `- ${item.food_name}: ${item.calories}kcal`
+            `- [FACT] ${item.content} (Category: ${item.metadata?.category})`
         ).join('\n');
 
-        return `\n\n[REAL DATA FROM KAGGLE DATABASE]:\nI found these exact facts in our database:\n${facts}\nUse this data to be precise.`;
+        return `\n\n[RAG KNOWLEDGE BASE]:\nI found these verified facts in our database:\n${facts}\nUse this data to ensure accuracy while maintaining your Chef Nourish persona.`;
     } catch (e) {
         console.error("Vector Search Error:", e);
         return "";
@@ -248,7 +248,8 @@ async function searchNutritionFacts(query: string): Promise<string> {
 
 export const chatWithNutritionBot = async (history: ChatMessage[], message: string, imageBase64?: string): Promise<string> => {
     try {
-        // 1. RAG Search (Retrieval Augmented Generation)
+        // 1. RAG Search (Hybrid Architecture)
+        // Retrieve relevant facts before calling the Fine-Tuned Model
         const ragContext = await searchNutritionFacts(message);
 
         const messages: any[] = [
@@ -269,17 +270,25 @@ export const chatWithNutritionBot = async (history: ChatMessage[], message: stri
                 ]
             });
         } else {
+            // Add history for conversation flow
+            messages.push(...history.map(msg => ({
+                role: msg.sender === 'user' ? 'user' : 'assistant',
+                content: msg.text
+            } as any)).slice(-3));
             messages.push({ role: "user", content: message });
         }
 
+        // Use the Fine-Tuned Model (Chef Nourish)
+        const model = import.meta.env.VITE_NUTRITION_MODEL || "gpt-3.5-turbo";
+
         const completion = await openai.chat.completions.create({
             messages: messages,
-            model: "gpt-4o-mini", // Or gpt-4o for better vision
+            model: model,
         });
-        return completion.choices[0].message.content || "Looks like food to me.";
+        return completion.choices[0].message.content || "Looks delicious! 🥗";
     } catch (error) {
         console.error("Nutrition Bot Error:", error);
-        return "My stomach hurts, try again later.";
+        return "My oven is overheating! Give me a second. 🍳";
     }
 };
 

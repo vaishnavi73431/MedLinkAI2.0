@@ -121,7 +121,11 @@ const App: React.FC = () => {
       inventory: [],
       unlockedZones: ['home', 'hospital'],
       removedTrees: [],
-      reminders: []
+      reminders: [],
+      restaurantXP: 0,
+      restaurantLevel: 1,
+      streak: 0,
+      lastCompletedDate: null
     };
   });
 
@@ -196,7 +200,11 @@ const App: React.FC = () => {
               inventory: profile.inventory || [],
               placedItems: profile.placed_items || [],
               unlockedZones: (profile.unlocked_zones as any[]) || ['home'],
-              removedTrees: profile.removed_trees || []
+              removedTrees: profile.removed_trees || [],
+              restaurantXP: profile.restaurant_xp || 0,
+              restaurantLevel: profile.restaurant_level || 1,
+              streak: profile.streak_count || 0,
+              lastCompletedDate: profile.last_completed_date || null
             }));
             console.log("Loaded user profile:", profile);
             setUserProfile(profile);
@@ -296,6 +304,10 @@ const App: React.FC = () => {
           placedItems: gameState.placedItems,
           unlockedZones: gameState.unlockedZones,
           removedTrees: gameState.removedTrees,
+          restaurant_xp: gameState.restaurantXP,
+          restaurant_level: gameState.restaurantLevel,
+          streak: gameState.streak,
+          lastCompletedDate: gameState.lastCompletedDate
         });
         console.log("Auto-saved game state");
       }
@@ -379,7 +391,10 @@ const App: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const [tasks, setTasks] = useState<HabitTask[]>([
+  /* ------------------------------------------------------------
+     DAILY HABIT PERSISTENCE & RESET LOGIC
+     ------------------------------------------------------------ */
+  const DEFAULT_TASKS: HabitTask[] = [
     { id: 'h-1', title: 'Regular Physical Activity', description: '30 mins of moderate exercise (walk/cycle/yoga).', points: 50, completed: false, category: 'exercise' },
     { id: 'h-2', title: 'Adequate High-Quality Sleep', description: 'Get 7-8 hours. Click the Alarm to set your schedule.', points: 50, completed: false, category: 'sleep' },
     { id: 'h-3', title: 'Healthy Balanced Nutrition', description: 'Eat fruits, veggies, and whole grains.', points: 50, completed: false, category: 'nutrition' },
@@ -389,7 +404,74 @@ const App: React.FC = () => {
     { id: 'h-7', title: 'Micro-acts of Joy & Kindness', description: 'Perform one small act of kindness.', points: 50, completed: false, category: 'mindfulness' },
     { id: 'init-0', title: 'Zen Garden Breathing', description: 'Perform 10 deep breaths. Stay calm!', points: 200, completed: false, category: 'mindfulness' },
     { id: 'init-2', title: 'Hydration Hero', description: 'Drink a glass of water!', points: 250, completed: false, category: 'water' }
-  ]);
+  ];
+
+  const [tasks, setTasks] = useState<HabitTask[]>(DEFAULT_TASKS);
+
+  // Load from localStorage or Reset if New Day
+  useEffect(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const lastResetDate = localStorage.getItem('last_reset_date');
+    const savedTasks = localStorage.getItem('daily_habit_tasks');
+
+    if (lastResetDate !== today) {
+      console.log(`[Daily Reset] New day detected: ${today}. Resetting tasks.`);
+      // Reset to defaults (completed: false)
+      setTasks(DEFAULT_TASKS);
+      localStorage.setItem('last_reset_date', today);
+      localStorage.setItem('daily_habit_tasks', JSON.stringify(DEFAULT_TASKS));
+      // Optional: Add a "New Day" notification if desired
+    } else if (savedTasks) {
+      console.log("[Persistence] Loading saved tasks for today.");
+      setTasks(JSON.parse(savedTasks));
+    } else {
+      // First time initialization
+      localStorage.setItem('last_reset_date', today);
+      localStorage.setItem('daily_habit_tasks', JSON.stringify(DEFAULT_TASKS));
+    }
+  }, []);
+
+  // Save to localStorage whenever tasks change
+
+  useEffect(() => {
+    if (tasks.length > 0) {
+      localStorage.setItem('daily_habit_tasks', JSON.stringify(tasks));
+
+      const allCompleted = tasks.every(t => t.completed);
+      if (allCompleted) {
+        const today = new Date().toISOString().split('T')[0];
+        if (gameState.lastCompletedDate !== today) {
+          // Increment Streak!
+          const newStreak = (gameState.streak || 0) + 1;
+          setGameState(prev => ({
+            ...prev,
+            streak: newStreak,
+            lastCompletedDate: today
+          }));
+
+          // Notifications
+          addNotification("DAILY QUESTS COMPLETE! 🌟", 'level');
+          addNotification(`Streak: ${newStreak} Days! 🔥`, 'coins');
+
+          // Trigger Chat Message
+          setMessages(prev => [...prev, {
+            id: `streak-${Date.now()}`,
+            sender: 'bot',
+            text: `INCREDIBLE! You finished all your daily habits! That's a ${newStreak}-day streak! Keep this momentum going! 🔥🚀`,
+            timestamp: Date.now()
+          }]);
+
+          // Update DB immediately
+          if (userProfile?.id) {
+            dataService.updateProfile(userProfile.id, {
+              streak_count: newStreak,
+              last_completed_date: today
+            });
+          }
+        }
+      }
+    }
+  }, [tasks]);
 
   const addNotification = (text: string, type: 'coins' | 'level' | 'zone' | 'deduction') => {
     const id = Math.random().toString(36).substr(2, 9);
@@ -451,6 +533,37 @@ const App: React.FC = () => {
     }));
 
     setMessages(prev => [...prev, { id: `cel-${Date.now()}`, sender: 'bot', text: `Verified! +${points} Coins earned! 🪙`, timestamp: Date.now() }]);
+  };
+
+  /* ------------------------------------------------------------
+     DINER TYCOON LOGIC
+     ------------------------------------------------------------ */
+  const handleAddRestaurantXP = (amount: number) => {
+    setGameState(prev => {
+      const newXP = (prev.restaurantXP || 0) + amount;
+
+      // Custom Level Thresholds - START AT LEVEL 1
+      let newLevel = 1; // Default Level 1
+      if (newXP >= 1110) newLevel = 5;
+      else if (newXP >= 710) newLevel = 4;
+      else if (newXP >= 410) newLevel = 3;
+      else if (newXP >= 210) newLevel = 2;
+
+      const levelUp = newLevel > (prev.restaurantLevel || 0);
+
+      if (levelUp) {
+        addNotification(`DINER LEVEL UP! LVL ${newLevel} 🍳`, 'level');
+        addNotification(`New Decor Unlocked!`, 'zone');
+      } else {
+        addNotification(`+${amount} Diner XP`, 'coins');
+      }
+
+      return {
+        ...prev,
+        restaurantXP: newXP,
+        restaurantLevel: newLevel
+      };
+    });
   };
 
   const handleRemoveTree = (treeIndex: number, cost: number) => {
@@ -663,7 +776,7 @@ const App: React.FC = () => {
 
   const renderContent = () => {
     switch (currentView) {
-      case 'missions': return <TaskBoard tasks={tasks} setTasks={setTasks} onTaskComplete={handleTaskComplete} currentScore={gameState.score} setGameState={setGameState} />;
+      case 'missions': return <TaskBoard tasks={tasks} setTasks={setTasks} onTaskComplete={handleTaskComplete} currentScore={gameState.score} streak={gameState.streak || 0} setGameState={setGameState} />;
       case 'chat': return (
         <MobileInterface
           key={mobileEntrySource}
@@ -676,6 +789,7 @@ const App: React.FC = () => {
           onVisitRestaurant={() => setCurrentView('restaurant-interior')}
           onVisitHospital={() => setCurrentView('hospital-interior')}
           onVisitSevaHub={() => setIsSevaHubOpen(true)}
+          onAddRestaurantXP={handleAddRestaurantXP}
         />
       );
       case 'leaderboard': return <Leaderboard gameState={gameState} />;
@@ -1028,10 +1142,65 @@ const App: React.FC = () => {
                 backgroundColor: '#fff'
               }}
             >
+              {/* LEVEL 1 UNLOCK: Right Side Dining Set */}
+              {gameState.restaurantLevel >= 1 && (
+                <div className="absolute top-[2000px] left-[2500px] z-20">
+                  {/* Chair */}
+                  <div className="absolute -top-8 left-12 w-16 h-20 bg-[#8D6E63] border-4 border-black rounded-lg -z-10">
+                    <div className="absolute -top-8 left-0 w-16 h-12 bg-[#5D4037] border-4 border-black rounded-t-lg" />
+                  </div>
+                  {/* Table */}
+                  <div className="w-40 h-24 bg-[#E67E22] border-4 border-black rounded-lg shadow-2xl relative flex items-center justify-center">
+                    <div className="w-32 h-16 bg-[#D35400] rounded opacity-50" />
+                  </div>
+                  <div className="absolute top-4 left-4 w-4 h-20 bg-[#A04000] -z-10" />
+                  <div className="absolute top-4 right-4 w-4 h-20 bg-[#A04000] -z-10" />
+                </div>
+              )}
+
+              {/* LEVEL 2 UNLOCK: Left Side Dining Set */}
+              {gameState.restaurantLevel >= 2 && (
+                <div className="absolute top-[2000px] left-[1600px] z-20">
+                  {/* Chair */}
+                  <div className="absolute -top-8 left-12 w-16 h-20 bg-[#8D6E63] border-4 border-black rounded-lg -z-10">
+                    <div className="absolute -top-8 left-0 w-16 h-12 bg-[#5D4037] border-4 border-black rounded-t-lg" />
+                  </div>
+                  {/* Table */}
+                  <div className="w-40 h-24 bg-[#E67E22] border-4 border-black rounded-lg shadow-2xl relative flex items-center justify-center">
+                    <div className="w-32 h-16 bg-[#D35400] rounded opacity-50" />
+                  </div>
+                  <div className="absolute top-4 left-4 w-4 h-20 bg-[#A04000] -z-10" />
+                  <div className="absolute top-4 right-4 w-4 h-20 bg-[#A04000] -z-10" />
+                </div>
+              )}
+
+              {/* LEVEL 3 UNLOCK: Center Dining Set */}
+              {gameState.restaurantLevel >= 3 && (
+                <div className="absolute top-[2000px] left-[2050px] z-20">
+                  {/* Chair */}
+                  <div className="absolute -top-8 left-12 w-16 h-20 bg-[#8D6E63] border-4 border-black rounded-lg -z-10">
+                    <div className="absolute -top-8 left-0 w-16 h-12 bg-[#5D4037] border-4 border-black rounded-t-lg" />
+                  </div>
+                  {/* Table */}
+                  <div className="w-40 h-24 bg-[#E67E22] border-4 border-black rounded-lg shadow-2xl relative flex items-center justify-center">
+                    <div className="w-32 h-16 bg-[#D35400] rounded opacity-50" />
+                  </div>
+                  <div className="absolute top-4 left-4 w-4 h-20 bg-[#A04000] -z-10" />
+                  <div className="absolute top-4 right-4 w-4 h-20 bg-[#A04000] -z-10" />
+                </div>
+              )}
+
+              {/* LEVEL 5 UNLOCK: VIP Area Rug */}
+              {gameState.restaurantLevel >= 5 && (
+                <div className="absolute top-[2100px] left-[1900px] w-[300px] h-[150px] bg-[#8E44AD] rounded-full border-4 border-black opacity-60 blur-sm pointer-events-none z-10" />
+              )}
+
               <div
                 onClick={(e) => { e.stopPropagation(); setCurrentView('global-chat'); }}
                 className="absolute top-[2350px] left-[2250px] w-[200px] h-[350px] cursor-pointer hover:scale-110 active:scale-95 transition-all group monitor-container scale-75 origin-top-left z-[55]"
               >
+
+
                 <div className="absolute -top-32 left-1/2 -translate-x-1/2 bg-[#0F172A] text-cyan-400 text-[12px] font-black py-2 px-4 rounded-xl border-2 border-cyan-800 shadow-[0_0_20px_rgba(34,211,238,0.3)] monitor-hover-hint whitespace-nowrap z-50">
                   JOIN THE FEED 🌍
                   <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-3 h-3 bg-[#0F172A] border-r-2 border-b-2 border-cyan-800 rotate-45" />
@@ -1098,18 +1267,25 @@ const App: React.FC = () => {
               </div>
 
               <div className="absolute top-[1200px] left-[1500px] w-[1000px] h-[600px] flex flex-col items-center">
+                {/* LEVEL 1: Basic Floor */}
                 <div className="absolute inset-0 bg-[#2D3436] rounded-xl border-4 border-[#000] overflow-hidden"
                   style={{ backgroundImage: 'linear-gradient(to right, #000 2px, transparent 2px), linear-gradient(to bottom, #000 2px, transparent 2px)', backgroundSize: '40px 20px' }}>
-                  <div className="absolute top-10 left-10 w-48 space-y-12">
-                    {[1, 2, 3].map(i => (
-                      <div key={i} className="h-4 bg-[#D1A377] border-2 border-black rounded-sm shadow-lg relative">
-                        <div className="absolute -top-8 left-4 flex gap-2">
-                          <div className="w-8 h-8 bg-white border-2 border-black rounded-full" />
-                          <div className="w-8 h-8 bg-[#E74C3C] border-2 border-black rounded-full" />
-                        </div>
-                      </div>
-                    ))}
+
+
+                </div>
+
+                {/* LEVEL 5 UNLOCK: VIP Chef's Table */}
+                {gameState.restaurantLevel >= 5 ? (
+                  <div className="absolute top-20 left-1/2 -translate-x-1/2 w-[400px] h-[250px] bg-[#D4AF37] border-4 border-black relative shadow-[0_0_50px_rgba(255,215,0,0.5)]">
+                    <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-black text-[#D4AF37] px-4 py-1 font-black border-2 border-[#D4AF37] rounded-full uppercase tracking-widest text-xs z-20">VIP Chef's Table</div>
+                    <div className="absolute bottom-0 w-full h-8 bg-[#D1A377] border-t-2 border-black" />
+                    <div className="absolute -top-12 left-0 w-full h-16 flex">
+                      {[1, 2, 3, 4, 5, 6].map(i => (
+                        <div key={i} className={`flex-1 h-full border-x border-b-4 border-black ${i % 2 === 0 ? 'bg-[#F39C12]' : 'bg-[#D35400]'}`} />
+                      ))}
+                    </div>
                   </div>
+                ) : (
                   <div className="absolute top-20 left-1/2 -translate-x-1/2 w-[400px] h-[250px] bg-[#34495E] border-4 border-black relative">
                     <div className="absolute bottom-0 w-full h-8 bg-[#D1A377] border-t-2 border-black" />
                     <div className="absolute -top-12 left-0 w-full h-16 flex">
@@ -1118,78 +1294,176 @@ const App: React.FC = () => {
                       ))}
                     </div>
                   </div>
-                  <div className="absolute top-10 right-10 w-48 flex flex-col gap-6 items-center">
-                    <div className="w-40 h-56 bg-[#1C1C1C] border-4 border-[#333] p-4 shadow-xl">
-                      <div className="space-y-4">
-                        {[1, 2, 3, 4].map(i => (
-                          <div key={i} className="h-1 bg-[#F1C40F] rounded-full w-2/3" />
-                        ))}
+                )}
+
+                {/* KITCHEN WALL AREA: Status Board & Appliances */}
+                <div className="absolute top-20 right-20 flex flex-col items-center gap-6">
+
+                  {/* RESTAURANT STATUS BOARD (Restored Level System) */}
+                  <div className="w-64 bg-[#1C1C1C] border-4 border-[#4E342E] rounded-xl p-4 shadow-2xl relative">
+                    {/* Header */}
+                    <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-[#D35400] text-white text-[10px] font-black px-3 py-1 rounded border-2 border-[#4E342E] uppercase tracking-widest whitespace-nowrap shadow-md">
+                      Diner Rating: LVL {gameState.restaurantLevel}
+                    </div>
+
+                    {/* XP Progress */}
+                    <div className="mt-4 mb-4">
+                      <div className="flex justify-between text-[8px] text-stone-400 font-bold uppercase mb-1">
+                        <span>XP Progress</span>
+                        <span>{gameState.restaurantLevel < 5 ? `${gameState.restaurantXP || 0} / ${gameState.restaurantLevel === 0 ? 90 : gameState.restaurantLevel === 1 ? 210 : gameState.restaurantLevel === 2 ? 410 : gameState.restaurantLevel === 3 ? 710 : 1110}` : 'MAX'}</span>
+                      </div>
+                      <div className="w-full h-3 bg-stone-800 rounded-full border border-stone-600 overflow-hidden">
+                        <div
+                          className="h-full bg-gradient-to-r from-orange-500 to-yellow-500 transition-all duration-500"
+                          style={{ width: `${Math.min(100, ((gameState.restaurantXP || 0) / (gameState.restaurantLevel === 0 ? 90 : gameState.restaurantLevel === 1 ? 210 : gameState.restaurantLevel === 2 ? 410 : gameState.restaurantLevel === 3 ? 710 : 1110)) * 100)}%` }}
+                        />
                       </div>
                     </div>
-                    <div className="w-32 h-32 bg-[#95A5A6] border-4 border-black relative">
+
+                    {/* Unlock Checklist */}
+                    <div className="space-y-2">
+                      <p className="text-[8px] text-stone-500 font-bold uppercase tracking-wider border-b border-stone-700 pb-1">Unlocks</p>
+                      <div className={`flex items-center gap-2 text-[9px] font-bold ${gameState.restaurantLevel >= 1 ? 'text-green-400' : 'text-stone-600'}`}>
+                        <div className={`w-3 h-3 rounded-full border-2 flex items-center justify-center ${gameState.restaurantLevel >= 1 ? 'border-green-500 bg-green-900' : 'border-stone-600 bg-stone-800'}`}>
+                          {gameState.restaurantLevel >= 1 && <div className="w-1.5 h-1.5 bg-green-400 rounded-full" />}
+                        </div>
+                        <span>Tables (Right)</span>
+                      </div>
+                      <div className={`flex items-center gap-2 text-[9px] font-bold ${gameState.restaurantLevel >= 2 ? 'text-green-400' : 'text-stone-600'}`}>
+                        <div className={`w-3 h-3 rounded-full border-2 flex items-center justify-center ${gameState.restaurantLevel >= 2 ? 'border-green-500 bg-green-900' : 'border-stone-600 bg-stone-800'}`}>
+                          {gameState.restaurantLevel >= 2 && <div className="w-1.5 h-1.5 bg-green-400 rounded-full" />}
+                        </div>
+                        <span>Tables (Left) + Fridge</span>
+                      </div>
+                      <div className={`flex items-center gap-2 text-[9px] font-bold ${gameState.restaurantLevel >= 3 ? 'text-green-400' : 'text-stone-600'}`}>
+                        <div className={`w-3 h-3 rounded-full border-2 flex items-center justify-center ${gameState.restaurantLevel >= 3 ? 'border-green-500 bg-green-900' : 'border-stone-600 bg-stone-800'}`}>
+                          {gameState.restaurantLevel >= 3 && <div className="w-1.5 h-1.5 bg-green-400 rounded-full" />}
+                        </div>
+                        <span>Tables (Center)</span>
+                      </div>
+                      <div className={`flex items-center gap-2 text-[9px] font-bold ${gameState.restaurantLevel >= 5 ? 'text-gold-400' : 'text-stone-600'}`}>
+                        <div className={`w-3 h-3 rounded-full border-2 flex items-center justify-center ${gameState.restaurantLevel >= 5 ? 'border-yellow-500 bg-yellow-900' : 'border-stone-600 bg-stone-800'}`}>
+                          {gameState.restaurantLevel >= 5 && <div className="w-1.5 h-1.5 bg-yellow-400 rounded-full" />}
+                        </div>
+                        <span className={gameState.restaurantLevel >= 5 ? 'text-yellow-400' : ''}>VIP Chef's Table</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* LEVEL 2 UNLOCK: Quality Fridge */}
+                  {gameState.restaurantLevel >= 2 ? (
+                    <div className="w-32 h-32 bg-[#E0E0E0] border-4 border-black relative shadow-lg cursor-pointer group hover:scale-105 transition-transform" onClick={(e) => { e.stopPropagation(); /* Add fridge interaction later? */ }}>
+                      <div className="absolute top-4 left-1/2 -translate-x-1/2 w-4 h-4 bg-[#2ECC71] rounded-full border-2 border-black animate-pulse" />
+                      <div className="absolute bottom-4 left-4 right-4 h-12 bg-[#BDC3C7] border-2 border-black group-hover:bg-[#AAB7B8] transition-colors" />
+                      {/* Fridge Handle */}
+                      <div className="absolute top-10 left-3 w-2 h-10 bg-stone-400 border border-stone-500 rounded-full" />
+                    </div>
+                  ) : (
+                    <div className="w-32 h-32 bg-[#555] border-4 border-black relative opacity-60">
                       <div className="absolute top-4 left-1/2 -translate-x-1/2 w-4 h-4 bg-[#E74C3C] rounded-full border-2 border-black" />
-                      <div className="absolute bottom-4 left-4 right-4 h-12 bg-[#2C3E50] border-2 border-black" />
-                    </div>
-                  </div>
-                </div>
-                <div
-                  onClick={(e) => { e.stopPropagation(); setIsDieticianBoardOpen(true); }}
-                  className="absolute bottom-40 w-[1100px] h-[160px] bg-[#8D6E63] border-4 border-black shadow-2xl flex flex-col cursor-pointer group dietician-desk-container"
-                >
-                  <div className="absolute -top-32 left-1/2 -translate-x-1/2 bg-stone-800 text-white text-[24px] font-black py-4 px-8 rounded-2xl border-4 border-stone-700 shadow-2xl dietician-desk-hover-hint whitespace-nowrap z-50">
-                    CONSULT A DIETICIAN 🥗
-                    <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 w-6 h-6 bg-stone-800 border-r-4 border-b-4 border-stone-700 rotate-45" />
-                  </div>
-                  <div className="h-4 bg-[#D1A377] border-b-2 border-black" />
-                  <div className="flex-1 flex" style={{ backgroundImage: 'linear-gradient(to right, #5D4037 4px, transparent 4px)', backgroundSize: '60px 100%' }}>
-                  </div>
-                </div>
-                <div className="absolute bottom-10 w-full flex justify-around px-20">
-                  {[1, 2, 3, 4, 5, 6].map(i => (
-                    <div key={i} className="flex flex-col items-center">
-                      <div className="w-24 h-12 bg-[#C0392B] rounded-full border-4 border-black shadow-lg relative">
-                        <div className="absolute top-1 left-2 right-2 h-4 bg-white/20 rounded-full" />
+                      <div className="absolute bottom-4 left-4 right-4 h-12 bg-[#333] border-2 border-black" />
+                      <div className="absolute inset-0 flex items-center justify-center">
+                        <span className="bg-black/50 text-white text-[8px] font-black uppercase px-2 py-1 rounded">Lvl 2</span>
                       </div>
-                      <div className="w-4 h-32 bg-[#2D3436] border-2 border-black" />
-                      <div className="w-20 h-6 bg-[#2D3436] border-2 border-black rounded-full" />
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Consult Dietician Desk (Diner Counter Style) */}
+              <div
+                onClick={(e) => { e.stopPropagation(); setIsDieticianBoardOpen(true); }}
+                className="absolute top-[1640px] left-[1500px] w-[1000px] h-[200px] z-40 dietician-desk-container cursor-pointer group"
+              >
+
+                {/* Counter Top */}
+                <div className="absolute top-0 w-full h-12 bg-[#D35400] border-4 border-black rounded-lg z-20 shadow-lg" />
+
+                {/* Counter Body */}
+                <div className="absolute top-8 w-full h-32 bg-[#2C3E50] border-4 border-black rounded-b-lg z-10 flex">
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(i => (
+                    <div key={i} className="flex-1 border-r-2 border-black/30 bg-gradient-to-b from-transparent to-black/20" />
+                  ))}
+                </div>
+
+                {/* Stools */}
+                <div className="absolute top-24 w-full flex justify-around px-8 z-30 pointer-events-none">
+                  {[1, 2, 3, 4, 5].map(i => (
+                    <div key={i} className="flex flex-col items-center group-hover:translate-y-1 transition-transform">
+                      <div className="w-16 h-12 bg-[#C0392B] rounded-full border-4 border-black shadow-md relative">
+                        <div className="absolute top-1 left-2 right-2 h-3 bg-white/20 rounded-full" />
+                      </div>
+                      <div className="w-2 h-20 bg-[#2D3436] border-2 border-black -mt-2" />
+                      <div className="w-8 h-4 bg-[#2D3436] border-2 border-black rounded-full -mt-2" />
                     </div>
                   ))}
                 </div>
+
+                {/* Register / Menu */}
+                <div className="absolute -top-16 right-20 w-32 h-24 bg-[#1A1A1A] border-4 border-gray-600 rounded-lg transform rotate-3 flex flex-col p-1 shadow-xl">
+                  <div className="w-full h-full border-2 border-gray-700 flex flex-col gap-1 p-1">
+                    <div className="h-1 bg-yellow-500 w-3/4" />
+                    <div className="h-1 bg-yellow-500 w-1/2" />
+                    <div className="h-1 bg-yellow-500 w-full" />
+                  </div>
+                </div>
               </div>
+
+
+
+
+            </div>
+
+            <div className="absolute bottom-10 w-full flex justify-around px-20">
+              {[1, 2, 3, 4, 5, 6].map(i => (
+                <div key={i} className="flex flex-col items-center">
+                  <div className="w-24 h-12 bg-[#C0392B] rounded-full border-4 border-black shadow-lg relative">
+                    <div className="absolute top-1 left-2 right-2 h-4 bg-white/20 rounded-full" />
+                  </div>
+                  <div className="w-4 h-32 bg-[#2D3436] border-2 border-black" />
+                  <div className="w-20 h-6 bg-[#2D3436] border-2 border-black rounded-full" />
+                </div>
+              ))}
             </div>
           </div>
-          {isDieticianBoardOpen && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
-              <div className="bg-[#1A1A1C] border-4 border-[#2E7D32] w-full max-w-sm rounded-xl overflow-hidden shadow-2xl flex flex-col animate-in fade-in zoom-in duration-200">
-                <div className="bg-[#2E7D32] p-4 flex justify-between items-center border-b-4 border-[#1B5E20]">
-                  <div className="flex items-center gap-3 text-white">
-                    <Search size={20} />
-                    <span className="font-black uppercase tracking-widest text-sm">Online Dietician Consult</span>
-                  </div>
-                  <button onClick={() => setIsDieticianBoardOpen(false)} className="text-white/60 hover:text-white">
-                    <X size={24} />
-                  </button>
-                </div>
-                <div className="p-4 space-y-3 bg-stone-900">
-                  <p className="text-stone-400 text-[10px] uppercase font-black tracking-widest mb-4">Professional nutrition help in India:</p>
-                  {DIETICIAN_RESOURCES.map((resource, i) => (
-                    <button
-                      key={i}
-                      onClick={() => window.open(resource.url, '_blank')}
-                      className="w-full bg-[#2C2C2E] border-2 border-[#3E3E42] p-4 rounded-xl flex items-center justify-between group hover:border-[#2E7D32] transition-all hover:bg-[#2E7D32]/10 active:scale-95"
-                    >
-                      <span className="text-white font-bold text-sm">{resource.name}</span>
-                      <ExternalLink size={16} className="text-stone-500 group-hover:text-white" />
+
+          {
+            isDieticianBoardOpen && (
+              <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-md p-4">
+                <div className="bg-[#1A1A1C] border-4 border-[#2E7D32] w-full max-w-sm rounded-xl overflow-hidden shadow-2xl flex flex-col animate-in fade-in zoom-in duration-200">
+                  <div className="bg-[#2E7D32] p-4 flex justify-between items-center border-b-4 border-[#1B5E20]">
+                    <div className="flex items-center gap-3 text-white">
+                      <Search size={20} />
+                      <span className="font-black uppercase tracking-widest text-sm">Online Dietician Consult</span>
+                    </div>
+                    <button onClick={() => setIsDieticianBoardOpen(false)} className="text-white/60 hover:text-white">
+                      <X size={24} />
                     </button>
-                  ))}
-                </div>
-                <div className="bg-[#2E7D32]/10 p-4 border-t-2 border-[#2E7D32]/20">
-                  <p className="text-[9px] text-stone-500 italic text-center">Consulting a professional is recommended for custom health plans.</p>
+                  </div>
+                  <div className="p-4 space-y-3 bg-stone-900">
+                    <p className="text-stone-400 text-[10px] uppercase font-black tracking-widest mb-4">Professional nutrition help in India:</p>
+                    {DIETICIAN_RESOURCES.map((resource, i) => (
+                      <button
+                        key={i}
+                        onClick={() => {
+                          window.open(resource.url, '_blank');
+                          handleAddRestaurantXP(150);
+                        }}
+                        className="w-full bg-[#2C2C2E] border-2 border-[#3E3E42] p-4 rounded-xl flex items-center justify-between group hover:border-[#2E7D32] transition-all hover:bg-[#2E7D32]/10 active:scale-95"
+                      >
+                        <span className="text-white font-bold text-sm">{resource.name}</span>
+                        <ExternalLink size={16} className="text-stone-500 group-hover:text-white" />
+                      </button>
+                    ))}
+                  </div>
+                  <div className="bg-[#2E7D32]/10 p-4 border-t-2 border-[#2E7D32]/20">
+                    <p className="text-[9px] text-stone-500 italic text-center">Consulting a professional is recommended for custom health plans.</p>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
-        </div>
+            )
+          }
+        </div >
       );
       case 'gym-interior': return (
         <div className="flex-1 flex flex-col relative overflow-hidden bg-white">
@@ -1644,7 +1918,7 @@ const App: React.FC = () => {
   const isGardenVisible = currentView === 'garden' || (currentView === 'chat' && mobileEntrySource === 'home');
 
   return (
-    <div className="h-screen w-full bg-stone-900 flex justify-center items-center overflow-hidden">
+    <div className="h-safe-screen w-full bg-stone-900 flex justify-center items-center overflow-hidden">
       <div className="relative w-full h-full max-w-md bg-[#8CBF82] flex flex-col shadow-2xl overflow-hidden border-x-4 border-[#556B2F]">
 
         {/* AUTHENTICATION FLOW */}
@@ -1707,7 +1981,7 @@ const App: React.FC = () => {
             </div>
             <TrainBoard isOpen={isTrainOpen} onClose={(reward) => { if (reward) handleTaskComplete(50); setIsTrainOpen(false); }} />
             <CampingBoard isOpen={isCampingOpen} onClose={(reward) => { if (reward) handleTaskComplete(40); setIsCampingOpen(false); }} />
-            <RestaurantBoard isOpen={isRestaurantOpen} onClose={(reward) => { if (reward) handleTaskComplete(60); setIsRestaurantOpen(false); }} />
+            <RestaurantBoard isOpen={isRestaurantOpen} onClose={(reward) => { if (reward) handleTaskComplete(60); setIsRestaurantOpen(false); }} onAddRestaurantXP={handleAddRestaurantXP} />
             <GymBoard isOpen={isGymOpen} onClose={(reward) => { if (reward) handleTaskComplete(50); setIsGymOpen(false); }} />
             <SevaHubBoard isOpen={isSevaHubOpen} onClose={(reward) => { if (reward) handleTaskComplete(100); setIsSevaHubOpen(false); }} />
             <YogaBoard isOpen={isYogaOpen} onClose={(reward) => { if (reward) handleTaskComplete(50); setIsYogaOpen(false); }} />

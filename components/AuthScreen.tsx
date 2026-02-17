@@ -164,7 +164,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ mode, onBack, onSuccess }) => {
                                     required
                                     value={fullName}
                                     onChange={(e) => setFullName(e.target.value)}
-                                    className="w-full bg-white rounded-xl border-none p-2.5 text-sm text-[#2D3748] placeholder-[#A0AEC0] shadow-sm focus:ring-2 focus:ring-[#4299E1] outline-none font-medium"
+                                    className="w-full bg-white rounded-xl border-none p-2.5 text-base text-[#2D3748] placeholder-[#A0AEC0] shadow-sm focus:ring-2 focus:ring-[#4299E1] outline-none font-medium"
                                     placeholder="Your hero name"
                                 />
                             </div>
@@ -177,7 +177,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ mode, onBack, onSuccess }) => {
                                         required
                                         value={dob}
                                         onChange={(e) => setDob(e.target.value)}
-                                        className="w-full bg-white rounded-xl border-none p-2.5 text-sm text-[#2D3748] placeholder-[#A0AEC0] shadow-sm focus:ring-2 focus:ring-[#4299E1] outline-none font-medium"
+                                        className="w-full bg-white rounded-xl border-none p-2.5 text-base text-[#2D3748] placeholder-[#A0AEC0] shadow-sm focus:ring-2 focus:ring-[#4299E1] outline-none font-medium"
                                     />
                                 </div>
                                 <div className="space-y-1 flex-1">
@@ -186,7 +186,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ mode, onBack, onSuccess }) => {
                                         required
                                         value={gender}
                                         onChange={(e) => setGender(e.target.value)}
-                                        className="w-full bg-white rounded-xl border-none p-2.5 text-sm text-[#2D3748] shadow-sm focus:ring-2 focus:ring-[#4299E1] outline-none font-medium appearance-none"
+                                        className="w-full bg-white rounded-xl border-none p-2.5 text-base text-[#2D3748] shadow-sm focus:ring-2 focus:ring-[#4299E1] outline-none font-medium appearance-none"
                                     >
                                         <option value="">Select</option>
                                         <option value="Male">Male</option>
@@ -207,7 +207,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ mode, onBack, onSuccess }) => {
                             required
                             value={email}
                             onChange={(e) => setEmail(e.target.value)}
-                            className="w-full bg-white rounded-xl border-none p-3 text-sm text-[#2D3748] placeholder-[#A0AEC0] shadow-sm focus:ring-2 focus:ring-[#4299E1] outline-none font-medium"
+                            className="w-full bg-white rounded-xl border-none p-3 text-base text-[#2D3748] placeholder-[#A0AEC0] shadow-sm focus:ring-2 focus:ring-[#4299E1] outline-none font-medium"
                             placeholder={mode === 'login' ? "hero@example.com" : "enter email"}
                         />
                     </div>
@@ -221,7 +221,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ mode, onBack, onSuccess }) => {
                             required
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
-                            className="w-full bg-white rounded-xl border-none p-3 text-sm text-[#2D3748] placeholder-[#A0AEC0] shadow-sm focus:ring-2 focus:ring-[#4299E1] outline-none font-medium tracking-widest"
+                            className="w-full bg-white rounded-xl border-none p-3 text-base text-[#2D3748] placeholder-[#A0AEC0] shadow-sm focus:ring-2 focus:ring-[#4299E1] outline-none font-medium tracking-widest"
                             placeholder={mode === 'signup' ? "Your secret phrase" : "••••••••"}
                         />
                     </div>

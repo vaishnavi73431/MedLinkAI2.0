@@ -1003,6 +1003,48 @@ const PixelGarden: React.FC<PixelGardenProps> = ({ gameState, currentTime, onRem
             ctx.fillRect(dx_door, zy - doorH, dW, doorH);
             ctx.strokeRect(dx_door, zy - doorH, dW, doorH);
 
+            // Level Badge
+            if (gameState.restaurantLevel && gameState.restaurantLevel > 0) {
+                const badgeX = bx + buildingW / 2;
+                const badgeY = by - 30 * scale;
+                const outerRadius = 24 * scale;
+                const innerRadius = 12 * scale;
+
+                // Star shape background
+                ctx.fillStyle = '#FFD700'; // Gold
+                ctx.strokeStyle = '#F57F17';
+                ctx.beginPath();
+                const spikes = 5;
+                let rot = Math.PI / 2 * 3;
+                let x = badgeX;
+                let y = badgeY;
+                const step = Math.PI / spikes;
+
+                ctx.moveTo(badgeX, badgeY - outerRadius);
+                for (let i = 0; i < spikes; i++) {
+                    x = badgeX + Math.cos(rot) * outerRadius;
+                    y = badgeY + Math.sin(rot) * outerRadius;
+                    ctx.lineTo(x, y);
+                    rot += step;
+
+                    x = badgeX + Math.cos(rot) * innerRadius;
+                    y = badgeY + Math.sin(rot) * innerRadius;
+                    ctx.lineTo(x, y);
+                    rot += step;
+                }
+                ctx.lineTo(badgeX, badgeY - outerRadius);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+
+                // Text
+                ctx.fillStyle = '#000000';
+                ctx.font = `bold ${20 * scale}px sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.fillText(gameState.restaurantLevel.toString(), badgeX, badgeY + 2 * scale);
+            }
+
             const counterY = zy - 30 * scale;
             const counterW = 210 * scale;
             ctx.fillStyle = '#E74C3C';

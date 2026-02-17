@@ -1,12 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Heart, MessageCircle, UserPlus, Send, Camera, MoreHorizontal, UserCheck, CheckCircle2, X, Trophy, Users, Newspaper, MessageSquare } from 'lucide-react';
-import { ChatMessage } from '../types';
+import { ChatMessage, GameState, ZoneType, FurnitureItem } from '../types';
 import { dataService } from '../services/dataService';
 import { authService } from '../services/authService';
+import PixelGarden from './PixelGarden';
 
 interface Post {
     id: string;
     author: {
+        id: string; // Added ID
         name: string;
         avatarColor: string;
         isBot: boolean;
@@ -29,6 +31,7 @@ interface Friend {
     id: string;
     full_name: string;
     level: number;
+    streak?: number;
 }
 
 interface Achievement {
@@ -41,20 +44,81 @@ interface Achievement {
 interface DirectMessage {
     id: string;
     sender_id: string;
-    text: string;
+    content: string;
     created_at: string;
 }
+
+interface FriendRequest {
+    id: string;
+    requester: {
+        id: string;
+        full_name: string;
+        level: number;
+        avatar_url?: string;
+    };
+    created_at: string;
+}
+
+interface Conversation {
+    id: string;
+    full_name: string;
+    level: number;
+    avatar_url?: string;
+    lastMessage: string;
+    timestamp: string;
+    unread: boolean;
+}
+
+const BOT_PERSONAS = [
+    { id: 'bot-sprout', name: 'Sprout 🌱', avatarColor: '#10B981', role: 'Guide' },
+    { id: 'bot-flex', name: 'Coach Flex 💪', avatarColor: '#F59E0B', role: 'Trainer' },
+    { id: 'bot-bite', name: 'Bite-Sized 🍎', avatarColor: '#EF4444', role: 'Nutritionist' },
+    { id: 'bot-triage', name: 'Dr. Triage 🩺', avatarColor: '#3B82F6', role: 'Doctor' }
+];
+
+const CONTENT_BANK: Record<string, string[]> = {
+    'bot-sprout': [
+        "Small steps every day lead to big changes! 🌿 Keep growing!",
+        "Did you know? Consistency is key to habit formation. You're doing great!",
+        "Take a moment to breathe deeply. 🧘 Your mental garden needs water too.",
+        "Every checkmark is a victory. Celebrate your progress today! 🎉",
+        "Your village is thriving because YOU are thriving. Keep it up! 🏡"
+    ],
+    'bot-flex': [
+        "No pain, no gain? Nah, just consistency! Move your body today! 🏃‍♂️",
+        "Stretch it out! Your future self will thank you. 🧘‍♀️",
+        "Strength doesn't come from what you can do. It comes from overcoming the things you once thought you couldn't. 💪",
+        "Hydrate and dominate! 💧 Don't forget your water bottle!",
+        "Rest days are just as important as training days. Listen to your body. 🛌"
+    ],
+    'bot-bite': [
+        "Eat the rainbow today! 🌈 Fruits and veggies power your pixel life.",
+        "Water is life! 💧 Have you had a glass recently?",
+        "Balance is everything. Enjoy your treats, but nourish your body first! 🍪🥗",
+        "Fuel your body, fuel your mind. What's for lunch? 🥗",
+        "Healthy eating isn't about restriction, it's about nourishment! 🍎"
+    ],
+    'bot-triage': [
+        "Sleep is the best medicine. 😴 Aim for those 7-8 hours tonight!",
+        "Mental health check: How are you feeling today? It's okay to not be okay. ❤️",
+        "Stress less, live more. Take 5 minutes for yourself. ⏳",
+        "Prevention is better than cure. Wash your hands and stay safe! 🧼",
+        "Listen to your body's signals. It knows what it needs. 👂"
+    ]
+};
 
 interface SocialFeedProps {
     onBack: () => void;
 }
 
 const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
-    const [activeTab, setActiveTab] = useState<'feed' | 'friends' | 'achievements'>('feed');
+    const [activeTab, setActiveTab] = useState<'feed' | 'friends' | 'achievements' | 'inbox'>('feed');
 
     // Data States
     const [posts, setPosts] = useState<Post[]>([]);
     const [friends, setFriends] = useState<Friend[]>([]);
+    const [friendRequests, setFriendRequests] = useState<FriendRequest[]>([]);
+    const [conversations, setConversations] = useState<Conversation[]>([]);
     const [achievements, setAchievements] = useState<Achievement[]>([]);
     const [potentialFriends, setPotentialFriends] = useState<Friend[]>([]);
 
@@ -63,6 +127,12 @@ const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
     const [currentUserId, setCurrentUserId] = useState<string | null>(null);
     const [currentUserProfile, setCurrentUserProfile] = useState<any>(null);
     const [activeChatFriend, setActiveChatFriend] = useState<Friend | null>(null);
+
+    // Visit Logic
+    const [visitingProfile, setVisitingProfile] = useState<Friend | null>(null);
+    const [visitingVillage, setVisitingVillage] = useState<boolean>(false);
+    const [visitingGameState, setVisitingGameState] = useState<GameState | null>(null);
+
     const [messages, setMessages] = useState<DirectMessage[]>([]);
     const [newMessageText, setNewMessageText] = useState('');
 
@@ -73,7 +143,16 @@ const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
     const activeCommentPost = useRef<string | null>(null);
     const [activeCommentPostId, setActiveCommentPostId] = useState<string | null>(null);
     const [commentText, setCommentText] = useState('');
+
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const messagesEndRef = useRef<HTMLDivElement>(null);
+
+    // Scroll to bottom of chat
+    useEffect(() => {
+        if (activeChatFriend) {
+            messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+        }
+    }, [messages, activeChatFriend]);
 
     // Initial Load
     useEffect(() => {
@@ -89,6 +168,49 @@ const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
         loadUser();
     }, [activeTab]);
 
+    // Daily Bot Posts Logic
+    useEffect(() => {
+        const checkDailyBotPosts = () => {
+            const today = new Date().toISOString().split('T')[0];
+            const lastPostDate = localStorage.getItem('last_bot_post_date');
+
+            if (lastPostDate !== today) {
+                // Generate posts
+                const newBotPosts: Post[] = BOT_PERSONAS.map(bot => {
+                    const messages = CONTENT_BANK[bot.id];
+                    const randomMessage = messages[Math.floor(Math.random() * messages.length)];
+                    return {
+                        id: `post-${bot.id}-${Date.now()}`,
+                        author: {
+                            id: bot.id,
+                            name: bot.name,
+                            avatarColor: bot.avatarColor,
+                            isBot: true
+                        },
+                        content: randomMessage,
+                        likes: Math.floor(Math.random() * 50) + 10, // Fake initial likes
+                        comments: [],
+                        isLiked: false,
+                        timestamp: Date.now()
+                    };
+                });
+
+                // Prepend to posts (client-side only for now to simulate feed activity)
+                // In a real app, these would be in the DB. We'll just add them to view state.
+                setPosts(prev => [...newBotPosts, ...prev]);
+
+                // Save to localStorage to prevent re-posting today
+                localStorage.setItem('last_bot_post_date', today);
+                console.log("Generated daily bot posts!", newBotPosts);
+            }
+        };
+
+        // Run check after a short delay to ensure posts state might be loaded (though we prepend)
+        // Or just run it.
+        const timer = setTimeout(checkDailyBotPosts, 2000);
+        return () => clearTimeout(timer);
+    }, []); // Run once on mount
+
     const loadTabContent = async (tab: string, userId: string) => {
         setLoading(true);
         if (tab === 'feed') {
@@ -96,15 +218,19 @@ const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
         } else if (tab === 'friends') {
             const { data: friendsData } = await dataService.getFriends(userId);
             setFriends(friendsData || []);
+            const { data: reqs } = await dataService.getFriendRequests(userId);
+            setFriendRequests(reqs || []);
             const { data: potential } = await dataService.getPotentialFriends(userId);
             setPotentialFriends(potential || []);
         } else if (tab === 'achievements') {
             const { data: ach } = await dataService.getAchievements();
             setAchievements(ach || []);
+        } else if (tab === 'inbox') {
+            const { data: convs } = await dataService.getAllConversations(userId);
+            setConversations(convs || []);
         }
         setLoading(false);
     };
-
     const refreshFeed = async (userId: string) => {
         const { data: feedData, error } = await dataService.getSocialFeed();
         if (error || !feedData) return;
@@ -112,6 +238,7 @@ const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
         const formattedPosts: Post[] = feedData.map((item: any) => ({
             id: item.id,
             author: {
+                id: item.user_id, // Map user_id to author.id
                 name: item.author_name,
                 avatarColor: item.author_avatar,
                 isBot: item.is_bot
@@ -166,8 +293,20 @@ const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
 
     const handleAddFriend = async (friendId: string) => {
         if (!currentUserId) return;
-        await dataService.addFriend(currentUserId, friendId);
-        loadTabContent('friends', currentUserId);
+        const res = await dataService.sendFriendRequest(currentUserId, friendId);
+        if (res.error) alert(res.error);
+        else {
+            alert("Friend Request Sent!");
+            // loadTabContent('friends', currentUserId); // No need to reload, just show feedback
+        }
+    };
+
+    const handleRespondToRequest = async (requestId: string, action: 'accept' | 'reject') => {
+        if (!currentUserId) return;
+        setLoading(true);
+        await dataService.respondToFriendRequest(requestId, action);
+        await loadTabContent('friends', currentUserId);
+        setLoading(false);
     };
 
     // Chat Logic
@@ -184,15 +323,193 @@ const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
         const text = newMessageText;
         setNewMessageText('');
         // Optimistic
-        setMessages(prev => [...prev, { id: 'temp-' + Date.now(), sender_id: currentUserId, text, created_at: new Date().toISOString() }]);
+        setMessages(prev => [...prev, { id: 'temp-' + Date.now(), sender_id: currentUserId, content: text, created_at: new Date().toISOString() }]);
 
-        await dataService.sendDirectMessage(currentUserId, activeChatFriend.id, text);
+        const { error } = await dataService.sendDirectMessage(currentUserId, activeChatFriend.id, text);
+        if (error) {
+            console.error('Error sending message:', error);
+            alert(`Failed to send message: ${error.message}`);
+            // Remove optimistic update if failed?
+            setMessages(prev => prev.filter(m => m.content !== text)); // simple rollback
+            return;
+        }
+
         // Refresh?
         const { data } = await dataService.getDirectMessages(currentUserId, activeChatFriend.id);
         setMessages(data || []);
     };
 
     // --- RENDER HELPERS ---
+
+    const handleProfileClick = async (userId: string, name: string, level: number) => {
+        if (userId === currentUserId) return; // Don't visit self
+        setVisitingProfile({ id: userId, full_name: name, level, streak: 0 }); // Optimistic / Placeholder
+
+        // Fetch full profile for streak and accurate level
+        const { data } = await dataService.getProfile(userId);
+        if (data) {
+            setVisitingProfile(prev => prev?.id === userId ? { ...prev, streak: data.streak_count || 0, level: data.level } : prev);
+        }
+    };
+
+    const handleAddFriendFromProfile = async () => {
+        if (!currentUserId || !visitingProfile) return;
+        const res = await dataService.sendFriendRequest(currentUserId, visitingProfile.id);
+        if (res.error) {
+            alert(res.error);
+        } else {
+            alert("Friend Request Sent!");
+            // setVisitingProfile(null); 
+        }
+    };
+
+    const handleVisitVillage = async () => {
+        if (!visitingProfile) return;
+        setLoading(true);
+        const { data: profile } = await dataService.getProfile(visitingProfile.id);
+
+        if (profile) {
+            // Map UserProfile (snake_case) to GameState (camelCase)
+            const gameState: GameState = {
+                score: profile.score || 0,
+                level: profile.level || 1,
+                maxScoreForLevel: profile.max_score_for_level || 100,
+                inventory: profile.inventory || [], // Already same type
+                placedItems: profile.placed_items || [],
+                unlockedZones: (profile.unlocked_zones as ZoneType[]) || ['home'],
+                removedTrees: profile.removed_trees || [],
+                reminders: [], // Not needed for visual
+                restaurantXP: profile.restaurant_xp || 0,
+                restaurantLevel: profile.restaurant_level || 1,
+                streak: profile.streak_count || 0,
+                lastCompletedDate: profile.last_completed_date || null
+            };
+            setVisitingGameState(gameState);
+            setVisitingVillage(true);
+        } else {
+            alert("Could not load village data.");
+        }
+        setLoading(false);
+    };
+
+    // Profile Visit Logic (Full Screen now)
+    if (visitingVillage && visitingGameState && visitingProfile) {
+        return (
+            <div className="h-full flex flex-col bg-stone-900 relative">
+                {/* Overlay Header */}
+                <div className="absolute top-0 left-0 right-0 p-4 z-50 flex justify-between items-start pointer-events-none">
+                    <div className="bg-black/50 backdrop-blur-md p-2 rounded-xl pointer-events-auto">
+                        <button onClick={() => setVisitingVillage(false)} className="p-2 bg-white/10 hover:bg-white/20 rounded-lg text-white">
+                            <X size={20} />
+                        </button>
+                    </div>
+                    <div className="bg-black/50 backdrop-blur-md px-4 py-2 rounded-xl pointer-events-auto">
+                        <h3 className="font-bold text-white text-sm">Visiting {visitingProfile.full_name}'s Village</h3>
+                    </div>
+                </div>
+
+                {/* Read-Only Pixel Garden */}
+                <div className="flex-1 overflow-hidden">
+                    <PixelGarden
+                        gameState={visitingGameState}
+                        currentTime={new Date()}
+                        isVisible={true}
+                        onRemoveTree={() => false} // No-op
+                        onTrainClick={() => { }}
+                        onCampingClick={() => { }}
+                        onRestaurantClick={() => { }}
+                        onHospitalClick={() => { }}
+                        onGymClick={() => { }}
+                        onSevaHubClick={() => { }}
+                        onYogaClick={() => { }}
+                        onSproutClick={() => { }}
+                        onShopOpen={() => { }}
+                        onPlaceItem={() => { }}
+                        notifications={[]}
+                    />
+                </div>
+            </div>
+        );
+    }
+
+    if (visitingProfile) {
+        const isAlreadyFriend = friends.some(f => f.id === visitingProfile.id);
+
+        return (
+            <div className="h-full flex flex-col bg-stone-50">
+                <div className="bg-white p-4 border-b border-stone-200 flex items-center gap-4 sticky top-0 z-10">
+                    <button onClick={() => setVisitingProfile(null)} className="p-2 hover:bg-stone-100 rounded-full">
+                        <X size={20} className="text-stone-600" />
+                    </button>
+                    <h3 className="font-bold text-stone-800">Homestead Visit</h3>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center gap-6">
+                    {/* Avatar & Info */}
+                    <div className="bg-white p-6 rounded-3xl border-4 border-stone-200 shadow-xl flex flex-col items-center w-full max-w-sm">
+                        <div className="w-24 h-24 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-3xl font-black border-4 border-indigo-200 mb-4">
+                            {visitingProfile.full_name[0]}
+                        </div>
+                        <h2 className="text-2xl font-black text-stone-800">{visitingProfile.full_name}</h2>
+                        <div className="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest mt-2 border border-yellow-200">
+                            Level {visitingProfile.level} Resident
+                        </div>
+
+                        <div className="mt-6 flex flex-col gap-3 w-full">
+                            {/* Message */}
+                            <button
+                                onClick={() => { setVisitingProfile(null); openChat(visitingProfile); }}
+                                className="w-full bg-purple-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-purple-700 transition-colors shadow-lg shadow-purple-200"
+                            >
+                                <MessageCircle size={20} /> Message
+                            </button>
+
+                            {/* Add Friend */}
+                            {!isAlreadyFriend && (
+                                <button
+                                    onClick={() => handleAddFriendFromProfile()}
+                                    className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors shadow-lg shadow-blue-200"
+                                >
+                                    <UserPlus size={20} /> Add Friend
+                                </button>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* Stats Card */}
+                    <div className="w-full max-w-sm grid grid-cols-2 gap-4">
+                        <div className="bg-emerald-50 p-4 rounded-2xl border-2 border-emerald-100">
+                            <div className="text-emerald-800 font-bold text-xs uppercase tracking-wider mb-1">Habit Streak</div>
+                            <div className="text-2xl font-black text-emerald-600">{visitingProfile.streak || 0} 🔥</div>
+                        </div>
+                        <div className="bg-orange-50 p-4 rounded-2xl border-2 border-orange-100">
+                            <div className="text-orange-800 font-bold text-xs uppercase tracking-wider mb-1">XP Earned</div>
+                            <div className="text-2xl font-black text-orange-600">-- ⚡</div>
+                        </div>
+                    </div>
+
+                    <div className="mt-8 text-center pb-8 w-full max-w-sm">
+                        <p className="text-stone-400 text-sm font-bold uppercase tracking-widest mb-4">Village Snapshot</p>
+                        <button
+                            onClick={handleVisitVillage}
+                            className="w-full h-40 bg-stone-200 rounded-xl border-4 border-stone-300 flex flex-col items-center justify-center hover:bg-stone-300 transition-colors group relative overflow-hidden"
+                        >
+                            {/* Placeholder Background (optional) */}
+                            <div className="absolute inset-0 bg-gradient-to-br from-green-100 to-blue-100 opacity-50" />
+
+                            <div className="relative z-10 flex flex-col items-center">
+                                <div className="bg-white p-3 rounded-full shadow-md mb-2 group-hover:scale-110 transition-transform">
+                                    <Users size={24} className="text-stone-500" />
+                                </div>
+                                <span className="font-bold text-stone-600">Tap to Visit Village</span>
+                                <span className="text-xs text-stone-400 mt-1">See {visitingProfile.full_name}'s progress!</span>
+                            </div>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     if (activeChatFriend) {
         return (
@@ -206,16 +523,20 @@ const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
                         <p className="text-xs text-stone-400">Level {activeChatFriend.level}</p>
                     </div>
                 </div>
-                <div className="flex-1 overflow-y-auto p-4 space-y-3 flex flex-col-reverse">
-                    <div className="flex flex-col gap-3 justify-end min-h-full">
+                <div className="flex-1 overflow-y-auto p-4 scrollbar-thin">
+                    <div className="flex flex-col gap-3 min-h-full justify-end">
+                        {messages.length === 0 && (
+                            <div className="text-center text-stone-300 text-xs font-bold uppercase tracking-widest mt-10 mb-auto">Start the conversation!</div>
+                        )}
                         {messages.map((msg) => {
                             const isMe = msg.sender_id === currentUserId;
                             return (
-                                <div key={msg.id} className={`max-w-[80%] p-3 rounded-2xl text-sm ${isMe ? 'bg-purple-600 text-white self-end rounded-tr-sm' : 'bg-white border border-stone-200 text-stone-800 self-start rounded-tl-sm'}`}>
-                                    {msg.text}
+                                <div key={msg.id} className={`max-w-[80%] p-3 rounded-2xl text-sm ${isMe ? 'bg-purple-600 text-white self-end rounded-tr-sm shadow-md' : 'bg-white border border-stone-200 text-stone-800 self-start rounded-tl-sm shadow-sm'}`}>
+                                    {msg.content}
                                 </div>
                             );
                         })}
+                        <div ref={messagesEndRef} />
                     </div>
                 </div>
                 <div className="p-3 bg-white border-t border-stone-200 flex gap-2">
@@ -224,10 +545,10 @@ const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
                         value={newMessageText}
                         onChange={e => setNewMessageText(e.target.value)}
                         placeholder="Type a message..."
-                        className="flex-1 bg-stone-50 border border-stone-200 rounded-full px-4 py-2 text-sm focus:outline-none focus:border-purple-300"
+                        className="flex-1 bg-stone-50 border border-stone-200 rounded-full px-4 py-2 text-sm focus:outline-none focus:border-purple-300 transition-colors"
                         onKeyDown={e => e.key === 'Enter' && sendMessage()}
                     />
-                    <button onClick={sendMessage} className="p-2 bg-purple-600 text-white rounded-full hover:bg-purple-700">
+                    <button onClick={sendMessage} className="p-2 bg-purple-600 text-white rounded-full hover:bg-purple-700 shadow-md transition-transform active:scale-95">
                         <Send size={18} />
                     </button>
                 </div>
@@ -241,18 +562,24 @@ const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
             <div className="bg-white shadow-sm sticky top-0 z-10">
                 <div className="p-4 border-b border-stone-100 flex items-center justify-between">
                     <h2 className="text-xl font-black bg-gradient-to-r from-purple-600 to-pink-600 bg-clip-text text-transparent italic tracking-tighter">SocialSphere</h2>
-                    <button onClick={onBack} className="p-2 hover:bg-stone-100 rounded-full">
-                        <MoreHorizontal size={24} className="text-stone-400" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button onClick={() => setActiveTab('inbox')} className="p-2 hover:bg-stone-100 rounded-full relative">
+                            <MessageCircle size={24} className={activeTab === 'inbox' ? "text-purple-600" : "text-stone-400"} />
+                            {/* Unread badge logic could go here */}
+                        </button>
+                        <button onClick={onBack} className="p-2 hover:bg-stone-100 rounded-full">
+                            <X size={24} className="text-stone-400" />
+                        </button>
+                    </div>
                 </div>
                 <div className="flex">
-                    <button onClick={() => setActiveTab('feed')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${activeTab === 'feed' ? 'border-b-2 border-purple-600 text-purple-600' : 'text-stone-400'}`}>
+                    <button onClick={() => setActiveTab('feed')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${activeTab === 'feed' ? 'border-b-2 border-purple-600 text-purple-600' : 'text-stone-400 hover:text-stone-600'}`}>
                         <Newspaper size={16} /> Feed
                     </button>
-                    <button onClick={() => setActiveTab('friends')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${activeTab === 'friends' ? 'border-b-2 border-purple-600 text-purple-600' : 'text-stone-400'}`}>
+                    <button onClick={() => setActiveTab('friends')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${activeTab === 'friends' ? 'border-b-2 border-purple-600 text-purple-600' : 'text-stone-400 hover:text-stone-600'}`}>
                         <Users size={16} /> Friends
                     </button>
-                    <button onClick={() => setActiveTab('achievements')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${activeTab === 'achievements' ? 'border-b-2 border-purple-600 text-purple-600' : 'text-stone-400'}`}>
+                    <button onClick={() => setActiveTab('achievements')} className={`flex-1 py-3 text-xs font-bold uppercase tracking-wider flex items-center justify-center gap-2 ${activeTab === 'achievements' ? 'border-b-2 border-purple-600 text-purple-600' : 'text-stone-400 hover:text-stone-600'}`}>
                         <Trophy size={16} /> Awards
                     </button>
                 </div>
@@ -264,7 +591,7 @@ const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
                         {/* Create Post */}
                         <div className="bg-white p-4 mb-2 border-b border-stone-100">
                             <div className="flex gap-3">
-                                <div className="w-10 h-10 rounded-full bg-indigo-400 flex items-center justify-center flex-shrink-0 text-white font-bold">
+                                <div className="w-10 h-10 rounded-full bg-indigo-400 flex items-center justify-center flex-shrink-0 text-white font-bold shadow-sm">
                                     {(currentUserProfile?.full_name?.[0]) || 'Y'}
                                 </div>
                                 <div className="flex-1">
@@ -311,7 +638,7 @@ const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
                                         <button
                                             onClick={handlePost}
                                             disabled={!newPostText.trim() && !selectedImage}
-                                            className="bg-purple-600 text-white px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider disabled:opacity-50"
+                                            className="bg-purple-600 text-white px-4 py-1.5 rounded-full text-xs font-bold uppercase tracking-wider disabled:opacity-50 shadow-md hover:bg-purple-700 transition-colors"
                                         >
                                             Post
                                         </button>
@@ -324,13 +651,24 @@ const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
                             posts.map(post => (
                                 <div key={post.id} className="bg-white border-b border-stone-100 pb-2">
                                     <div className="p-3 flex items-center justify-between">
-                                        <div className="flex items-center gap-3">
+                                        <div
+                                            className="flex items-center gap-3 cursor-pointer group"
+                                            onClick={() => {
+                                                console.log("Clicked author:", post.author);
+                                                if (post.author.id) {
+                                                    handleProfileClick(post.author.id, post.author.name, 0); // Passing 0 as level for now if not available
+                                                } else {
+                                                    console.error("No author ID found on post:", post);
+                                                    alert("Error: Could not find user details.");
+                                                }
+                                            }}
+                                        >
                                             <div className="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold shadow-sm" style={{ backgroundColor: post.author.avatarColor }}>
                                                 {post.author.name[0]?.toUpperCase()}
                                             </div>
                                             <div>
                                                 <div className="flex items-center gap-1">
-                                                    <h3 className="font-bold text-sm text-stone-800">{post.author.name}</h3>
+                                                    <h3 className="font-bold text-sm text-stone-800 hover:text-purple-600 transition-colors">{post.author.name}</h3>
                                                     {post.author.isBot && <CheckCircle2 size={12} className="text-blue-500 fill-blue-100" />}
                                                 </div>
                                                 <span className="text-[10px] text-stone-400 font-medium">
@@ -380,7 +718,39 @@ const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
 
                 {activeTab === 'friends' && (
                     <div className="p-4 space-y-6">
-                        {loading && <div className="text-center text-stone-400 text-xs font-bold uppercase tracking-widest">Loading Friends...</div>}
+                        {loading && <div className="text-center text-stone-400 text-xs font-bold uppercase tracking-widest">Loading...</div>}
+
+                        {/* Friend Requests */}
+                        {friendRequests.length > 0 && (
+                            <div className="mb-6">
+                                <h3 className="text-xs font-bold text-red-500 uppercase tracking-widest mb-3 flex items-center gap-2">
+                                    Pending Requests <span className="bg-red-100 text-red-600 px-2 rounded-full text-[10px]">{friendRequests.length}</span>
+                                </h3>
+                                <div className="space-y-3">
+                                    {friendRequests.map(req => (
+                                        <div key={req.id} className="bg-white p-3 rounded-xl border border-red-100 shadow-sm flex items-center justify-between">
+                                            <div className="flex items-center gap-3">
+                                                <div className="w-10 h-10 rounded-full bg-red-50 text-red-400 flex items-center justify-center font-bold">
+                                                    {req.requester.full_name[0]}
+                                                </div>
+                                                <div>
+                                                    <h4 className="font-bold text-stone-800 text-sm">{req.requester.full_name}</h4>
+                                                    <span className="text-xs text-stone-400">Level {req.requester.level}</span>
+                                                </div>
+                                            </div>
+                                            <div className="flex gap-2">
+                                                <button onClick={() => handleRespondToRequest(req.id, 'accept')} className="bg-stone-900 text-white px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider shadow-md hover:bg-stone-700">
+                                                    Confirm
+                                                </button>
+                                                <button onClick={() => handleRespondToRequest(req.id, 'reject')} className="bg-stone-100 text-stone-500 px-3 py-1.5 rounded-lg text-xs font-bold uppercase tracking-wider hover:bg-stone-200">
+                                                    Delete
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
                         {/* My Friends List */}
                         <div>
@@ -416,6 +786,7 @@ const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
                                 {potentialFriends.map(pf => {
                                     const isFriend = friends.some(f => f.id === pf.id);
                                     if (isFriend) return null;
+                                    // Check if I sent a request (UI doesn't track this yet perfectly without another query, but assuming button feedback is enough)
                                     return (
                                         <div key={pf.id} className="bg-white p-3 rounded-xl border border-stone-200 flex items-center justify-between shadow-sm opacity-80">
                                             <div className="flex items-center gap-3">
@@ -456,7 +827,48 @@ const SocialFeed: React.FC<SocialFeedProps> = ({ onBack }) => {
                         ))}
                     </div>
                 )}
+
+                {activeTab === 'inbox' && (
+                    <div className="p-4 space-y-4">
+                        {loading && <div className="text-center text-stone-400 text-xs font-bold uppercase tracking-widest">Loading Chats...</div>}
+                        {conversations.length === 0 && !loading && (
+                            <div className="text-center text-stone-400 text-xs italic mt-10">No messages yet. Start a chat from Friends!</div>
+                        )}
+                        {conversations.map(conv => (
+                            <div
+                                key={conv.id}
+                                onClick={() => {
+                                    // Construct a Friend object to open chat
+                                    openChat({ id: conv.id, full_name: conv.full_name, level: conv.level });
+                                }}
+                                className={`bg-white p-3 rounded-xl border flex items-center justify-between shadow-sm cursor-pointer hover:bg-stone-50 transition-colors ${conv.unread ? 'border-purple-300 bg-purple-50' : 'border-stone-200'}`}
+                            >
+                                <div className="flex items-center gap-3 overflow-hidden">
+                                    <div className="w-12 h-12 rounded-full bg-purple-100 text-purple-600 flex items-center justify-center font-bold flex-shrink-0">
+                                        {conv.full_name[0]}
+                                    </div>
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-2">
+                                            <h4 className={`text-sm truncate ${conv.unread ? 'font-black text-stone-900' : 'font-bold text-stone-700'}`}>{conv.full_name}</h4>
+                                            {conv.unread && <div className="w-2 h-2 bg-purple-500 rounded-full" />}
+                                        </div>
+                                        <p className={`text-xs truncate ${conv.unread ? 'text-stone-800 font-medium' : 'text-stone-400'}`}>
+                                            {conv.lastMessage}
+                                        </p>
+                                    </div>
+                                </div>
+                                <div className="text-[10px] text-stone-400 font-bold whitespace-nowrap pl-2">
+                                    {new Date(conv.timestamp).toLocaleDateString()}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
+
+            {/* Modals and Overlays */}
+            {/* Modals and Overlays */}
+            {/* Previously renderProfileModal() was here, now handled by conditional returns above */}
         </div>
     );
 };

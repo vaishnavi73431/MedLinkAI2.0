@@ -14,6 +14,8 @@ export const dataService = {
             inventory: [],
             placed_items: [],
             removed_trees: [],
+            restaurant_xp: 0,
+            restaurant_level: 1,
         };
 
         const { data, error } = await supabase
@@ -80,6 +82,10 @@ export const dataService = {
         placedItems: any[];
         unlockedZones: string[];
         removedTrees: number[];
+        restaurant_xp?: number;
+        restaurant_level?: number;
+        streak?: number;
+        lastCompletedDate?: string | null;
     }) {
         return this.updateProfile(userId, {
             level: state.level,
@@ -89,6 +95,10 @@ export const dataService = {
             placed_items: state.placedItems,
             unlocked_zones: state.unlockedZones,
             removed_trees: state.removedTrees,
+            restaurant_xp: state.restaurant_xp,
+            restaurant_level: state.restaurant_level,
+            streak_count: state.streak,
+            last_completed_date: state.lastCompletedDate || undefined
         });
     },
 
@@ -250,49 +260,179 @@ export const dataService = {
 
     // --- FRIENDS ---
     async getFriends(userId: string) {
-        // Fetch friendships where user is requester OR receiver
-        const { data: sent, error: e1 } = await supabase
+        // 1. Get all accepted friendships
+        const { data: friendships, error } = await supabase
             .from('friendships')
-            .select('receiver_id, status')
-            .eq('requester_id', userId);
+            .select('*')
+            .or(`requester_id.eq.${userId},receiver_id.eq.${userId}`)
+            .eq('status', 'accepted');
 
-        const { data: received, error: e2 } = await supabase
-            .from('friendships')
-            .select('requester_id, status')
-            .eq('receiver_id', userId);
+        if (error) {
+            console.error('Error fetching friends:', error);
+            return { data: [], error };
+        }
 
-        if (e1 || e2) return { data: [], error: e1 || e2 };
+        if (!friendships || friendships.length === 0) return { data: [], error: null };
 
-        const friendIds = [
-            ...(sent?.map(f => f.receiver_id) || []),
-            ...(received?.map(f => f.requester_id) || [])
-        ];
+        // 2. Extract friend IDs
+        const friendIds = friendships.map(f =>
+            f.requester_id === userId ? f.receiver_id : f.requester_id
+        );
 
-        if (friendIds.length === 0) return { data: [], error: null };
-
-        // Fetch profiles of friends
-        const { data: friends, error: e3 } = await supabase
+        // 3. Fetch profiles
+        const { data: profiles, error: profileError } = await supabase
             .from('profiles')
             .select('id, full_name, level')
             .in('id', friendIds);
 
-        return { data: friends, error: e3 };
+        return { data: profiles || [], error: profileError };
     },
 
-    async addFriend(requesterId: string, receiverId: string) {
-        // Check if already friends
+    async sendFriendRequest(requesterId: string, receiverId: string) {
+        // Check if already friends or pending
         const { data: existing } = await supabase
             .from('friendships')
             .select('*')
             .or(`and(requester_id.eq.${requesterId},receiver_id.eq.${receiverId}),and(requester_id.eq.${receiverId},receiver_id.eq.${requesterId})`)
             .single();
 
-        if (existing) return { error: 'Already friends or request pending' };
+        if (existing) {
+            if (existing.status === 'accepted') return { error: 'Already friends!' };
+            if (existing.status === 'pending') return { error: 'Request already pending.' };
+            // If rejected, maybe allow re-request? For now block.
+            return { error: 'Cannot send request.' };
+        }
 
+        // Send PENDING request
         const { error } = await supabase
             .from('friendships')
-            .insert({ requester_id: requesterId, receiver_id: receiverId, status: 'accepted' }); // Auto-accept for now
+            .insert({ requester_id: requesterId, receiver_id: receiverId, status: 'pending' });
+
         return { error };
+    },
+
+    async getFriendRequests(userId: string) {
+        // Fetch rows where receiver is ME and status is PENDING
+        const { data: requests, error } = await supabase
+            .from('friendships')
+            .select(`
+                id,
+                created_at,
+                requester:profiles!requester_id (id, full_name, level)
+            `)
+            .eq('receiver_id', userId)
+            .eq('status', 'pending');
+
+        // Transform for easier UI consumption if needed, or return as is
+        return { data: requests || [], error };
+    },
+
+    async respondToFriendRequest(requestId: string, action: 'accept' | 'reject') {
+        if (action === 'accept') {
+            const { error } = await supabase
+                .from('friendships')
+                .update({ status: 'accepted' })
+                .eq('id', requestId);
+            return { error };
+        } else {
+            const { error } = await supabase
+                .from('friendships')
+                .delete()
+                .eq('id', requestId);
+            return { error };
+        }
+    },
+
+
+    // --- DIRECT MESSAGES ---
+    async getDirectMessages(userId: string, friendId: string) {
+        console.log(`Getting DMs between ${userId} and ${friendId}`);
+        const { data, error } = await supabase
+            .from('direct_messages')
+            .select('*')
+            .or(`and(sender_id.eq.${userId},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${userId})`)
+            .order('created_at', { ascending: true });
+
+        if (error) console.error('Error getting DMs:', error);
+        else console.log(`Found ${data?.length} messages`);
+
+        return { data, error };
+    },
+
+    async sendDirectMessage(senderId: string, receiverId: string, content: string) {
+        const { error } = await supabase
+            .from('direct_messages')
+            .insert({
+                sender_id: senderId,
+                receiver_id: receiverId,
+                content: content,
+                read: false
+            });
+        return { error };
+    },
+
+    async getAllConversations(userId: string) {
+        // Get all unique users I have chatted with
+        // Simplest strategy: Fetch all messages involved with me, extract unique partner IDs
+        const { data: messages, error } = await supabase
+            .from('direct_messages')
+            .select('sender_id, receiver_id, content, created_at, read')
+            .or(`sender_id.eq.${userId},receiver_id.eq.${userId}`)
+            .order('created_at', { ascending: false });
+
+        console.log('Fetching conversations for user:', userId);
+        if (error) {
+            console.error('Error fetching conversations:', error);
+            return { data: [], error };
+        }
+        console.log('Messages fetched:', messages?.length);
+
+        if (error || !messages) return { data: [], error };
+
+        const partnerMap = new Map<string, any>();
+
+        for (const msg of messages) {
+            const partnerId = msg.sender_id === userId ? msg.receiver_id : msg.sender_id;
+            if (!partnerMap.has(partnerId)) {
+                partnerMap.set(partnerId, {
+                    partnerId,
+                    lastMessage: msg.content,
+                    timestamp: msg.created_at,
+                    unread: msg.receiver_id === userId && !msg.read
+                });
+            }
+        }
+
+        const partnerIds = Array.from(partnerMap.keys());
+        console.log('Unique partners:', partnerIds);
+
+        // Fetch profiles for these partners
+        if (partnerIds.length === 0) return { data: [], error: null };
+
+        const { data: profiles, error: profilesError } = await supabase
+            .from('profiles')
+            .select('id, full_name, level')
+            .in('id', partnerIds);
+
+        if (profilesError) {
+            console.error("Error fetching profiles for conversations:", profilesError);
+            // Don't return error, just proceed with unknown profiles
+        }
+
+        console.log(`Fetched ${profiles?.length || 0} profiles for inbox.`);
+
+        const conversations = partnerIds.map(pid => {
+            const profile = profiles?.find(p => p.id === pid);
+            const msgInfo = partnerMap.get(pid);
+            return {
+                id: pid,
+                full_name: profile?.full_name || 'Unknown User',
+                level: profile?.level || 1,
+                ...msgInfo
+            };
+        }).sort((a: any, b: any) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+
+        return { data: conversations || [], error: null };
     },
 
     async getPotentialFriends(currentUserId: string) {
@@ -306,20 +446,31 @@ export const dataService = {
         return { data, error };
     },
 
-    // --- DIRECT MESSAGES ---
-    async getDirectMessages(userId: string, friendId: string) {
-        const { data, error } = await supabase
-            .from('direct_messages')
-            .select('*')
-            .or(`and(sender_id.eq.${userId},receiver_id.eq.${friendId}),and(sender_id.eq.${friendId},receiver_id.eq.${userId})`)
-            .order('created_at', { ascending: true });
+    async searchNutritionFacts(embedding: number[]) {
+        const { data, error } = await supabase.rpc('match_nutrition_facts', {
+            query_embedding: embedding,
+            match_threshold: 0.5, // filter out low similarity
+            match_count: 3        // get top 3 facts
+        });
         return { data, error };
     },
 
-    async sendDirectMessage(senderId: string, receiverId: string, text: string) {
-        const { error } = await supabase
+    // --- DIAGNOSTICS ---
+    async runDiagnostics(userId: string) {
+        const { count: sentCount, error: sentError } = await supabase
             .from('direct_messages')
-            .insert({ sender_id: senderId, receiver_id: receiverId, text });
-        return { error };
-    }
+            .select('*', { count: 'exact', head: true })
+            .eq('sender_id', userId);
+
+        const { count: receivedCount, error: receivedError } = await supabase
+            .from('direct_messages')
+            .select('*', { count: 'exact', head: true })
+            .eq('receiver_id', userId);
+
+        return {
+            sent: sentCount || 0,
+            received: receivedCount || 0,
+            errors: [sentError, receivedError].filter(Boolean)
+        };
+    },
 };

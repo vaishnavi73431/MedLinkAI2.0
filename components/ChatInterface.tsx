@@ -394,7 +394,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, setMessages, ga
         </div>
       )}
 
-      <div className="p-2 bg-stone-800 border-t-4 border-stone-700 flex flex-col gap-2">
+      <div className="p-2 pb-safe bg-stone-800 border-t-4 border-stone-700 flex flex-col gap-2">
         {isListening && (
           <div className="flex items-center justify-center gap-2 py-1 animate-pulse">
             <div className="w-1.5 h-1.5 bg-red-500 rounded-full"></div>

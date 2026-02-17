@@ -8,6 +8,7 @@ interface TaskBoardProps {
   setTasks: React.Dispatch<React.SetStateAction<HabitTask[]>>;
   onTaskComplete: (points: number) => void;
   currentScore: number;
+  streak: number;
   setGameState: React.Dispatch<React.SetStateAction<GameState>>;
 }
 
@@ -24,7 +25,7 @@ function decodeBase64ToUint8Array(base64: string) {
 
 
 
-const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, setTasks, onTaskComplete, currentScore, setGameState }) => {
+const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, setTasks, onTaskComplete, currentScore, streak, setGameState }) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [verifyingTask, setVerifyingTask] = useState<HabitTask | null>(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -425,6 +426,20 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, setTasks, onTaskComplete, 
           {isGenerating ? <Loader2 className="animate-spin w-4 h-4" /> : <Sparkles className="w-4 h-4" />}
           New
         </button>
+      </div>
+
+      <div className="mb-4 bg-orange-950/30 border border-orange-900/50 rounded-lg p-2 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="p-1.5 bg-orange-900/50 rounded-full text-orange-500">
+            <Loader2 className={`w-4 h-4 ${streak > 0 ? 'text-orange-400' : 'text-stone-600'}`} />
+            {/* Using Loader2 as placeholder icon if Flame not available or just reuse standard icons */}
+            {/* Actually let's use Zap or Star if Flame is not imported. I see Zap imported. */}
+          </div>
+          <div className="flex flex-col">
+            <span className="text-[10px] font-black uppercase text-stone-500 tracking-widest leading-none">Daily Streak</span>
+            <span className="text-sm font-bold text-orange-400">{streak} Days 🔥</span>
+          </div>
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin">
