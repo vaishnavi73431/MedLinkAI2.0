@@ -36,6 +36,8 @@ Built for performance, scalability, and aesthetic delight:
 - **AI Core**: **OpenAI GPT-4o-mini** integration for:
     -   Dynamic NPC conversations (Doctor, Nutritionist, Trainer).
     -   **Computer Vision Verification**: Analyzing user photos to verify meditation/breathing tasks.
+    -   AI/ML: OpenAI API with vector embeddings
+Deployment: Vercel (web) / Expo (mobile-ready)
 
 ## 6. Business Model (Monetization)
 How we turn health into revenue:
