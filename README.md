@@ -33,9 +33,12 @@ Built for performance, scalability, and aesthetic delight:
 - **Build Tool**: **Vite** for lightning-fast HMR and optimized production bundles.
 - **Styling**: **Tailwind CSS** for rapid, responsive, and modern UI design.
 - **Rendering**: Custom **HTML5 Canvas** engine (`PixelGarden.tsx`) for high-performance 2D rendering of the game world without heavy game engine overhead.
+- Backend: Supabase (PostgreSQL + Authentication + Storage)
 - **AI Core**: **OpenAI GPT-4o-mini** integration for:
     -   Dynamic NPC conversations (Doctor, Nutritionist, Trainer).
     -   **Computer Vision Verification**: Analyzing user photos to verify meditation/breathing tasks.
+    -   AI/ML: OpenAI API with vector embeddings
+Deployment: Vercel (web) / Expo (mobile-ready)
 
 ## 6. Business Model (Monetization)
 How we turn health into revenue:
