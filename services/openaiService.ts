@@ -139,16 +139,22 @@ export const chatWithSprout = async (history: ChatMessage[], message: string, us
             ? `${SYSTEM_INSTRUCTION}\n\nUSER PROFILE:\nProfession: ${userProfile.profession || 'Unknown'}\nHealth Goal: ${userProfile.goal || 'General Health'}`
             : SYSTEM_INSTRUCTION;
 
+        const messages: any[] = [
+            { role: "system", content: systemMessage },
+            ...history.map(msg => ({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text } as any)).slice(-5), // Keep context small
+            { role: "user", content: message }
+        ];
+
+        // Enable Tools for Sprout
         const completion = await openai.chat.completions.create({
-            messages: [
-                { role: "system", content: systemMessage },
-                ...history.map(msg => ({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text } as any)).slice(-5), // Keep context small
-                { role: "user", content: message }
-            ],
+            messages: messages,
             model: "gpt-4o-mini",
+            tools: UNIVERSAL_TOOLS_SCHEMA as any,
+            tool_choice: "auto"
         });
 
-        return completion.choices[0].message.content || "I'm a bit tangled up in my vines! Try again?";
+        const finalResponse = await handleToolCalls(completion, messages);
+        return finalResponse.choices[0].message.content || "I'm a bit tangled up in my vines! Try again?";
     } catch (error) {
         console.error("Chat Error:", error);
         return "Sorry, my systems are acting up. 🤖";
@@ -195,15 +201,21 @@ export const chatWithTrainer = async (history: ChatMessage[], message: string): 
         // 1. RAG Search
         const ragContext = await searchGymExercises(message);
 
+        const messages: any[] = [
+            { role: "system", content: TRAINER_SYSTEM_INSTRUCTION + ragContext },
+            ...history.map(msg => ({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text } as any)).slice(-5),
+            { role: "user", content: message }
+        ];
+
         const completion = await openai.chat.completions.create({
-            messages: [
-                { role: "system", content: TRAINER_SYSTEM_INSTRUCTION + ragContext },
-                ...history.map(msg => ({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text } as any)).slice(-5),
-                { role: "user", content: message }
-            ],
+            messages: messages,
             model: "gpt-4o-mini",
+            tools: UNIVERSAL_TOOLS_SCHEMA as any,
+            tool_choice: "auto"
         });
-        return completion.choices[0].message.content || "Keep moving!";
+
+        const finalResponse = await handleToolCalls(completion, messages);
+        return finalResponse.choices[0].message.content || "Keep moving!";
     } catch (error) {
         console.error("Trainer Chat Error:", error);
         return "I'm out of breath! Give me a second.";
@@ -284,8 +296,12 @@ export const chatWithNutritionBot = async (history: ChatMessage[], message: stri
         const completion = await openai.chat.completions.create({
             messages: messages,
             model: model,
+            tools: UNIVERSAL_TOOLS_SCHEMA as any,
+            tool_choice: "auto"
         });
-        return completion.choices[0].message.content || "Looks delicious! 🥗";
+
+        const finalResponse = await handleToolCalls(completion, messages);
+        return finalResponse.choices[0].message.content || "Looks delicious! 🥗";
     } catch (error) {
         console.error("Nutrition Bot Error:", error);
         return "My oven is overheating! Give me a second. 🍳";
@@ -328,20 +344,127 @@ async function searchMedicalConditions(userMessage: string): Promise<string> {
     }
 }
 
+// ------------------------------------------------------------------
+// UNIVERSAL TOOL: Web Search
+// ------------------------------------------------------------------
+const UNIVERSAL_TOOLS_SCHEMA = [
+    {
+        type: "function",
+        function: {
+            name: "search_web_for_context",
+            description: "Fetches real-time information from the web. Use this when the user asks for current events, specific facts, guidelines, or data you don't know.",
+            parameters: {
+                type: "object",
+                properties: {
+                    query: {
+                        type: "string",
+                        description: "The topic to search for (e.g., 'dengue symptoms', 'how to prune roses', 'latest protein powder recall')."
+                    },
+                    domain_filter: {
+                        type: "string",
+                        description: "Optional: Restrict search to specific domains like 'cdc.gov', 'garden.org', 'crossfit.com'."
+                    }
+                },
+                required: ["query"]
+            }
+        }
+    }
+];
+
+async function search_web_for_context(query: string, domain_filter?: string): Promise<string> {
+    console.log(`[TOOL CALL] search_web_for_context: ${query} (Filter: ${domain_filter || 'none'})`);
+
+    const tavilyKey = import.meta.env.VITE_TAVILY_API_KEY;
+
+    if (tavilyKey) {
+        try {
+            const body: any = {
+                api_key: tavilyKey,
+                query: domain_filter ? `${query} site:${domain_filter}` : query,
+                search_depth: "basic",
+                include_answer: true,
+                max_results: 3
+            };
+
+            const response = await fetch("https://api.tavily.com/search", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(body)
+            });
+
+            const data = await response.json();
+            if (data.answer) {
+                return JSON.stringify({
+                    source: "Tavily AI Search",
+                    content: data.answer,
+                    results: data.results.map((r: any) => ({ title: r.title, url: r.url }))
+                });
+            }
+        } catch (error) {
+            console.error("Tavily Search Failed:", error);
+        }
+    }
+
+    // Fallback Mock Data for Demo
+    return JSON.stringify({
+        source: "System Mock",
+        content: `Internet search simulated. In production with API key, this would return real data for '${query}'.`
+    });
+}
+
+// Helper to handle tool calls generically
+async function handleToolCalls(completion: any, messages: any[]): Promise<any> {
+    const responseMessage = completion.choices[0].message;
+
+    // Use the existing openai instance from module scope if possible, or create new if needed
+    // Re-importing inside function to avoid scope issues in some environments, but module-level 'openai' const is available here.
+
+    if (responseMessage.tool_calls) {
+        const toolCall = responseMessage.tool_calls[0];
+        if (toolCall.function.name === "search_web_for_context" || toolCall.function.name === "get_official_health_data") {
+            const args = JSON.parse(toolCall.function.arguments);
+
+            // Execute Tool
+            const toolResponse = await search_web_for_context(args.query, args.source || args.domain_filter);
+
+            // Add history
+            messages.push(responseMessage);
+            messages.push({
+                role: "tool",
+                tool_call_id: toolCall.id,
+                content: toolResponse
+            });
+
+            // Second Call
+            const finalCompletion = await openai.chat.completions.create({
+                messages: messages,
+                model: "gpt-4o-mini",
+            });
+            return finalCompletion;
+        }
+    }
+    return completion;
+}
+
+
 export const chatWithDoctor = async (history: ChatMessage[], message: string): Promise<string> => {
     try {
-        // 1. RAG Search
         const ragContext = await searchMedicalConditions(message);
+        const messages: any[] = [
+            { role: "system", content: DOCTOR_SYSTEM_INSTRUCTION + ragContext },
+            ...history.map(msg => ({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text } as any)).slice(-5),
+            { role: "user", content: message }
+        ];
 
         const completion = await openai.chat.completions.create({
-            messages: [
-                { role: "system", content: DOCTOR_SYSTEM_INSTRUCTION + ragContext },
-                ...history.map(msg => ({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text } as any)).slice(-5),
-                { role: "user", content: message }
-            ],
+            messages: messages,
             model: "gpt-4o-mini",
+            tools: UNIVERSAL_TOOLS_SCHEMA as any,
+            tool_choice: "auto"
         });
-        return completion.choices[0].message.content || "I'm here to listen. Tell me more.";
+
+        const finalResponse = await handleToolCalls(completion, messages);
+        return finalResponse.choices[0].message.content || "I'm here to listen. Tell me more.";
     } catch (error) {
         console.error("Doctor Chat Error:", error);
         return "I'm currently attending to an emergency. One moment.";
