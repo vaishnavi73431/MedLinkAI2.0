@@ -33,12 +33,14 @@ Built for performance, scalability, and aesthetic delight:
 - **Build Tool**: **Vite** for lightning-fast HMR and optimized production bundles.
 - **Styling**: **Tailwind CSS** for rapid, responsive, and modern UI design.
 - **Rendering**: Custom **HTML5 Canvas** engine (`PixelGarden.tsx`) for high-performance 2D rendering of the game world without heavy game engine overhead.
-- Backend: Supabase (PostgreSQL + Authentication + Storage)
-- **AI Core**: **OpenAI GPT-4o-mini** integration for:
-    -   Dynamic NPC conversations (Doctor, Nutritionist, Trainer).
-    -   **Computer Vision Verification**: Analyzing user photos to verify meditation/breathing tasks.
-    -   AI/ML: OpenAI API with vector embeddings
-Deployment: Vercel (web) / Expo (mobile-ready)
+- **Backend**: **Supabase** (PostgreSQL + Authentication + pgvector for RAG Storage)
+- **AI Core (Hybrid Architecture)**: **Google Gemini 2.5 Flash** integration featuring:
+    - **Dynamic NPC Conversations**: Persona-driven bots (Doctor, Nutritionist, Trainer).
+    - **Retrieval-Augmented Generation (RAG)**: Uses `gemini-embedding-001` and Supabase vector search to inject factual medical, gym, and nutrition knowledge into bot responses, significantly reducing hallucinations.
+    - **Function Calling & Tool Use**: Real-time web search integration (Tavily API) to provide up-to-date health facts and guidelines when needed.
+    - **Fine-Tuned Models**: Specialized fine-tuned logic integrated for the Nutrition Bot to analyze user diets and verify meal photos with high precision.
+    - **Computer Vision Verification**: Analyzing user photos to verify meditation/breathing tasks.
+- **Deployment**: Vercel (web) / Expo (mobile-ready)
 
 ## 6. Business Model (Monetization)
 How we turn health into revenue:
