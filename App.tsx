@@ -65,6 +65,7 @@ const App: React.FC = () => {
   const [authStatus, setAuthStatus] = useState<'welcome' | 'login' | 'signup' | 'authenticated'>('welcome');
   const [currentView, setCurrentView] = useState<ViewState>('garden');
   const [userProfile, setUserProfile] = useState<any>(null);
+  const [weatherTemp, setWeatherTemp] = useState<number | null>(null);
 
   // ... existing state declarations ...
 
@@ -332,7 +333,7 @@ const App: React.FC = () => {
         if (!r.triggered && nowMs >= r.time) {
           changed = true;
 
-          if (Notification.permission === 'granted') {
+          if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
             try {
               const n = new Notification("Sprout: Wake up!", {
                 body: `Reminder: ${r.task}`,
@@ -390,6 +391,102 @@ const App: React.FC = () => {
     }, 15000);
     return () => clearInterval(interval);
   }, []);
+
+  /* ------------------------------------------------------------
+     WEATHER & SMART HYDRATION LOGIC
+     ------------------------------------------------------------ */
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(async (position) => {
+        try {
+          const { latitude, longitude } = position.coords;
+          const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m`);
+          const data = await res.json();
+          if (data.current?.temperature_2m) {
+            setWeatherTemp(data.current.temperature_2m);
+          }
+        } catch (e) {
+          console.error("Failed to fetch weather", e);
+        }
+      }, (error) => {
+        console.warn("Geolocation denied or error", error);
+      });
+    }
+  }, []);
+
+  const [totalGlasses, setTotalGlasses] = useState(8);
+
+  useEffect(() => {
+    if (!userProfile?.weight) return;
+
+    const weight = userProfile.weight;
+    const activity = userProfile.activity_level || 'Sedentary';
+
+    let targetMl = weight * 35; // Base hydration formula
+
+    // Activity Booster
+    if (activity === 'Active') targetMl += 500;
+    else if (activity === 'Athlete') targetMl += 1000;
+
+    let conditions = `${activity} Lifestyle!`;
+
+    // Climate Booster
+    if (weatherTemp !== null && weatherTemp > 30) {
+      targetMl = targetMl * 1.15; // 15% increase for hot weather
+      conditions = `Hot weather (>30°C) & ${activity}!`;
+    }
+
+    const finalLiters = (targetMl / 1000).toFixed(1);
+    const glasses = Math.ceil(targetMl / 250);
+    setTotalGlasses(glasses);
+
+    setTasks(prev => prev.map(t => {
+      if (t.id === 'init-2') {
+        return {
+          ...t,
+          description: `Drink ${finalLiters}L today — ${glasses} glasses of 250ml (${conditions})`
+        };
+      }
+      return t;
+    }));
+  }, [userProfile, weatherTemp]);
+
+  // Hydration glasses consumed (persisted daily)
+  const [glassesConsumed, setGlassesConsumed] = useState<number>(() => {
+    const today = new Date().toISOString().split('T')[0];
+    const saved = localStorage.getItem('hydration_date');
+    if (saved === today) {
+      return parseInt(localStorage.getItem('hydration_glasses') || '0', 10);
+    }
+    return 0;
+  });
+
+  // Last time a glass was drunk (for 30-min time gating)
+  const [lastGlassTime, setLastGlassTime] = useState<number>(() => {
+    return parseInt(localStorage.getItem('hydration_last_time') || '0', 10);
+  });
+
+  const GLASS_COOLDOWN_MS = 30 * 60 * 1000; // 30 minutes
+
+  const handleDrinkGlass = (skipCooldown = false) => {
+    const now = Date.now();
+    if (!skipCooldown && now - lastGlassTime < GLASS_COOLDOWN_MS) return; // Cooldown not passed
+    const today = new Date().toISOString().split('T')[0];
+    setLastGlassTime(now);
+    localStorage.setItem('hydration_last_time', String(now));
+    setGlassesConsumed(prev => {
+      const next = Math.min(prev + 1, totalGlasses);
+      localStorage.setItem('hydration_glasses', String(next));
+      localStorage.setItem('hydration_date', today);
+      // Complete task when all glasses drunk
+      if (next >= totalGlasses) {
+        const hydrationTask = tasks.find(t => t.id === 'init-2' && !t.completed);
+        if (hydrationTask) handleTaskComplete(hydrationTask.points);
+      }
+      return next;
+    });
+  };
+
 
   /* ------------------------------------------------------------
      DAILY HABIT PERSISTENCE & RESET LOGIC
@@ -776,7 +873,7 @@ const App: React.FC = () => {
 
   const renderContent = () => {
     switch (currentView) {
-      case 'missions': return <TaskBoard tasks={tasks} setTasks={setTasks} onTaskComplete={handleTaskComplete} currentScore={gameState.score} streak={gameState.streak || 0} setGameState={setGameState} />;
+      case 'missions': return <TaskBoard tasks={tasks} setTasks={setTasks} onTaskComplete={handleTaskComplete} currentScore={gameState.score} streak={gameState.streak || 0} setGameState={setGameState} userProfile={userProfile} glassesConsumed={glassesConsumed} totalGlasses={totalGlasses} onDrinkGlass={handleDrinkGlass} lastGlassTime={lastGlassTime} glassCooldownMs={GLASS_COOLDOWN_MS} />;
       case 'chat': return (
         <MobileInterface
           key={mobileEntrySource}
@@ -790,6 +887,7 @@ const App: React.FC = () => {
           onVisitHospital={() => setCurrentView('hospital-interior')}
           onVisitSevaHub={() => setIsSevaHubOpen(true)}
           onAddRestaurantXP={handleAddRestaurantXP}
+          userProfile={userProfile}
         />
       );
       case 'leaderboard': return <Leaderboard gameState={gameState} />;
@@ -823,7 +921,7 @@ const App: React.FC = () => {
             <ChevronLeft size={20} className="text-stone-600" />
             <span className="text-[10px] font-black uppercase tracking-widest pr-2">Back to Gym</span>
           </button>
-          <TrainerChat messages={trainerMessages} setMessages={setTrainerMessages} />
+          <TrainerChat messages={trainerMessages} setMessages={setTrainerMessages} userProfile={userProfile} />
         </div>
       );
       case 'nutrition-chat': return (
@@ -835,7 +933,7 @@ const App: React.FC = () => {
             <ChevronLeft size={20} className="text-stone-600" />
             <span className="text-[10px] font-black uppercase tracking-widest pr-2">Back to Diner</span>
           </button>
-          <NutritionChat messages={nutritionMessages} setMessages={setNutritionMessages} onBack={() => setCurrentView('restaurant-interior')} />
+          <NutritionChat messages={nutritionMessages} setMessages={setNutritionMessages} onBack={() => setCurrentView('restaurant-interior')} userProfile={userProfile} />
         </div>
       );
       case 'doctor-chat': return (
@@ -847,7 +945,7 @@ const App: React.FC = () => {
             <ChevronLeft size={20} className="text-stone-600" />
             <span className="text-[10px] font-black uppercase tracking-widest pr-2">Back to Med Wing</span>
           </button>
-          <DoctorChat messages={doctorMessages} setMessages={setDoctorMessages} onBack={() => setCurrentView('hospital-interior')} />
+          <DoctorChat messages={doctorMessages} setMessages={setDoctorMessages} onBack={() => setCurrentView('hospital-interior')} userProfile={userProfile} />
         </div>
       );
       case 'hospital-interior': return (

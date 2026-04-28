@@ -1,6 +1,10 @@
 {
     "rewrites": [
         {
+            "source": "/api/gemini-openai/(.*)",
+            "destination": "https://generativelanguage.googleapis.com/v1beta/openai/$1"
+        },
+        {
             "source": "/(.*)",
             "destination": "/index.html"
         }

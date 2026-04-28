@@ -11,7 +11,10 @@ env_path = Path(__file__).parent.parent / '.env'
 load_dotenv(env_path)
 
 # Initialize OpenAI
-client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+client = OpenAI(
+    api_key=os.getenv('OPENAI_API_KEY'),
+    base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+)
 
 # Initialize Supabase
 url: str = os.getenv('VITE_SUPABASE_URL')
@@ -66,7 +69,8 @@ def generate_embedding(text):
     """Generate embedding for text using OpenAI"""
     response = client.embeddings.create(
         input=text,
-        model="text-embedding-3-small"
+        model="gemini-embedding-001",
+        dimensions=768
     )
     return response.data[0].embedding
 

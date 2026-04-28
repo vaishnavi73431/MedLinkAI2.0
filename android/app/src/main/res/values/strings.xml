@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Medical Assistant AI</string>
+    <string name="title_activity_main">Medical Assistant AI</string>
+    <string name="package_name">com.medlinkai.app</string>
+    <string name="custom_url_scheme">com.medlinkai.app</string>
+</resources>

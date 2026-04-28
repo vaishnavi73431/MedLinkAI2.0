@@ -19,6 +19,7 @@ interface MobileInterfaceProps {
   onVisitHospital: () => void;
   onVisitSevaHub: () => void;
   onAddRestaurantXP: (amount: number) => void;
+  userProfile?: UserProfile;
 }
 
 type AppId = 'home' | 'chat' | 'location' | 'shopping' | 'newsletter' | 'social' | 'profile';
@@ -27,6 +28,10 @@ const ProfileView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   const [profileLoading, setProfileLoading] = useState(true);
   const [profession, setProfession] = useState('');
   const [goal, setGoal] = useState('');
+  const [dob, setDob] = useState('');
+  const [weight, setWeight] = useState('');
+  const [height, setHeight] = useState('');
+  const [activityLevel, setActivityLevel] = useState('Sedentary');
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   useEffect(() => {
@@ -37,6 +42,10 @@ const ProfileView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
         if (data) {
           setProfession(data.profession || '');
           setGoal(data.goal || '');
+          setDob(data.dob || '');
+          setWeight(data.weight?.toString() || '');
+          setHeight(data.height?.toString() || '');
+          setActivityLevel(data.activity_level || 'Sedentary');
         }
       }
       setProfileLoading(false);
@@ -50,7 +59,11 @@ const ProfileView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
     if (session?.user) {
       const { error } = await dataService.updateProfile(session.user.id, {
         profession,
-        goal
+        goal,
+        dob,
+        weight: weight ? parseFloat(weight) : undefined,
+        height: height ? parseFloat(height) : undefined,
+        activity_level: activityLevel
       });
       if (!error) {
         setSaveStatus('saved');
@@ -88,6 +101,55 @@ const ProfileView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
               placeholder="e.g. Software Engineer, Teacher..."
               className="w-full p-4 bg-stone-50 border-2 border-stone-100 rounded-2xl focus:border-purple-300 focus:outline-none focus:ring-4 focus:ring-purple-100 transition-all font-medium text-stone-700"
             />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-stone-500 uppercase tracking-wider ml-1">DOB</label>
+              <input
+                type="date"
+                value={dob}
+                onChange={(e) => setDob(e.target.value)}
+                className="w-full p-4 bg-stone-50 border-2 border-stone-100 rounded-2xl focus:border-purple-300 focus:outline-none focus:ring-4 focus:ring-purple-100 transition-all font-medium text-stone-700"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-stone-500 uppercase tracking-wider ml-1">Activity Level</label>
+              <select
+                value={activityLevel}
+                onChange={(e) => setActivityLevel(e.target.value)}
+                className="w-full p-4 bg-stone-50 border-2 border-stone-100 rounded-2xl focus:border-purple-300 focus:outline-none focus:ring-4 focus:ring-purple-100 transition-all font-medium text-stone-700"
+              >
+                <option value="Sedentary">Sedentary</option>
+                <option value="Active">Active</option>
+                <option value="Athlete">Athlete</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-stone-500 uppercase tracking-wider ml-1">Weight (kg)</label>
+              <input
+                type="number"
+                value={weight}
+                onChange={(e) => setWeight(e.target.value)}
+                placeholder="e.g. 70"
+                className="w-full p-4 bg-stone-50 border-2 border-stone-100 rounded-2xl focus:border-purple-300 focus:outline-none focus:ring-4 focus:ring-purple-100 transition-all font-medium text-stone-700"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <label className="text-xs font-bold text-stone-500 uppercase tracking-wider ml-1">Height (cm)</label>
+              <input
+                type="number"
+                value={height}
+                onChange={(e) => setHeight(e.target.value)}
+                placeholder="e.g. 175"
+                className="w-full p-4 bg-stone-50 border-2 border-stone-100 rounded-2xl focus:border-purple-300 focus:outline-none focus:ring-4 focus:ring-purple-100 transition-all font-medium text-stone-700"
+              />
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -255,7 +317,19 @@ const NewsView: React.FC<{ onBack: () => void }> = ({ onBack }) => {
   );
 };
 
-const MobileInterface: React.FC<MobileInterfaceProps> = ({ messages, setMessages, gameState, setGameState, initialApp = 'home', onVisitGym, onVisitRestaurant, onVisitHospital, onVisitSevaHub, onAddRestaurantXP }) => {
+const MobileInterface: React.FC<MobileInterfaceProps> = ({
+  messages,
+  setMessages,
+  gameState,
+  setGameState,
+  initialApp = 'home',
+  onVisitGym,
+  onVisitRestaurant,
+  onVisitHospital,
+  onVisitSevaHub,
+  onAddRestaurantXP,
+  userProfile
+}) => {
   const [activeApp, setActiveApp] = useState<AppId>(initialApp);
   const [mapOffset, setMapOffset] = useState({ x: 0, y: 0 });
   const [isDraggingMap, setIsDraggingMap] = useState(false);
@@ -652,7 +726,7 @@ const MobileInterface: React.FC<MobileInterfaceProps> = ({ messages, setMessages
               <ChevronLeft size={20} className="text-stone-600" />
             </button>
             <div className="flex-1 overflow-hidden">
-              <ChatInterface messages={messages} setMessages={setMessages} gameState={gameState} setGameState={setGameState} />
+              <ChatInterface messages={messages} setMessages={setMessages} gameState={gameState} setGameState={setGameState} userProfile={userProfile} />
             </div>
           </div>
         );

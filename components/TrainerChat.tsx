@@ -9,9 +9,10 @@ import { authService } from '../services/authService';
 interface TrainerChatProps {
   messages: ChatMessage[];
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
+  userProfile?: import('../types').UserProfile;
 }
 
-const TrainerChat: React.FC<TrainerChatProps> = ({ messages, setMessages }) => {
+const TrainerChat: React.FC<TrainerChatProps> = ({ messages, setMessages, userProfile }) => {
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -28,22 +29,34 @@ const TrainerChat: React.FC<TrainerChatProps> = ({ messages, setMessages }) => {
     if (!inputText.trim() || isLoading) return;
 
     const userMsg: ChatMessage = { id: Date.now().toString(), sender: 'user', text: inputText, timestamp: Date.now() };
-    setMessages(prev => [...prev, userMsg]);
+    // The provided instruction's setMessages call here was syntactically incorrect and missing the user message.
+    // Reconstructing based on typical chat flow: add user message, then a typing indicator.
+    setMessages(prev => [...prev, userMsg, { id: `trainer-${Date.now()}`, sender: 'bot', senderName: 'Coach Titan', avatarColor: '#EF4444', text: '', isTyping: true, timestamp: Date.now() }]);
     const currentInput = inputText;
     setInputText('');
     setIsLoading(true);
 
-    const responseText = await chatWithTrainer(messages, currentInput);
+    const responseText = await chatWithTrainer(messages, currentInput, userProfile);
 
-    const botMsg: ChatMessage = { id: (Date.now() + 1).toString(), sender: 'bot', text: responseText, timestamp: Date.now() };
-    setMessages(prev => [...prev, botMsg]);
+    const newBotMsg: ChatMessage = { id: (Date.now() + 1).toString(), sender: 'bot', text: responseText, timestamp: Date.now() };
+
+    // The provided instruction's setMessages call here was syntactically incorrect.
+    // Reconstructing to replace the typing indicator with the actual bot response.
+    setMessages(prev => {
+      // Find and replace the typing indicator, or just add if not found (fallback)
+      const lastMessageIndex = prev.length - 1;
+      if (lastMessageIndex >= 0 && prev[lastMessageIndex].isTyping) {
+        return [...prev.slice(0, lastMessageIndex), newBotMsg];
+      }
+      return [...prev, newBotMsg];
+    });
     setIsLoading(false);
 
     // Save to Supabase
     const { session } = await authService.getSession();
     if (session?.user) {
       await dataService.saveChatMessage(session.user.id, 'trainer', userMsg);
-      await dataService.saveChatMessage(session.user.id, 'trainer', botMsg);
+      await dataService.saveChatMessage(session.user.id, 'trainer', newBotMsg);
     }
   };
 

@@ -9,14 +9,62 @@ interface Message {
     content: string;
 }
 
+// Detect if running inside Capacitor (mobile app) vs browser
+// In Capacitor, window.location.origin is 'capacitor://localhost' which can't proxy API calls
+const getGeminiBaseURL = (): string => {
+    if (typeof window === 'undefined') return 'https://generativelanguage.googleapis.com/v1beta/openai/';
+    const origin = window.location.origin;
+    if (origin.startsWith('capacitor://') || origin.startsWith('ionic://') || origin === 'null') {
+        // Running in native mobile app — use direct Gemini API
+        return 'https://generativelanguage.googleapis.com/v1beta/openai/';
+    }
+    // Running in browser — use local Vite proxy
+    return origin + '/api/gemini-openai/';
+};
+
 // Initialize OpenAI Client
 // process.env.VITE_OPENAI_API_KEY will be populated by Vite's define or import.meta.env
 const apiKey = import.meta.env.VITE_OPENAI_API_KEY;
 
 const openai = new OpenAI({
     apiKey: apiKey,
+    baseURL: getGeminiBaseURL(),
     dangerouslyAllowBrowser: true // Required for client-side usage in Vite
 });
+
+// --- CACHE LAYER ---
+interface CacheEntry {
+    response: string;
+    timestamp: number;
+}
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+const getCachedResponse = (botName: string, message: string): string | null => {
+    if (typeof window === 'undefined') return null;
+    const key = `chat_cache_${botName}_${message.trim().toLowerCase()}`;
+    const cached = localStorage.getItem(key);
+    if (cached) {
+        try {
+            const entry: CacheEntry = JSON.parse(cached);
+            if (Date.now() - entry.timestamp < CACHE_TTL) {
+                console.log(`[CACHE HIT] Returning cached response for ${botName}: "${message}"`);
+                return entry.response;
+            } else {
+                localStorage.removeItem(key); // clear expired
+            }
+        } catch (e) { }
+    }
+    return null;
+};
+
+const setCachedResponse = (botName: string, message: string, response: string) => {
+    if (typeof window === 'undefined') return;
+    const key = `chat_cache_${botName}_${message.trim().toLowerCase()}`;
+    const entry: CacheEntry = { response, timestamp: Date.now() };
+    localStorage.setItem(key, JSON.stringify(entry));
+};
+// -------------------
+
 
 const SYSTEM_INSTRUCTION = `
 You are "Sprout", a friendly, enthusiastic pixel-art gardening robot assistant AND a capable first-aid medical guide.
@@ -133,11 +181,25 @@ Mission:
 - ALWAYS encourage users to use the teleconsultation service by clicking on the hospital's reception desk.
 `;
 
+const buildUserProfileContext = (userProfile?: UserProfile): string => {
+    if (!userProfile) return "";
+
+    return `\n\nUSER PROFILE:
+Profession: ${userProfile.profession || 'Unknown'}
+Health Goal: ${userProfile.goal || 'General Health'}
+Age/DOB: ${userProfile.dob || 'Unknown'}
+Weight: ${userProfile.weight ? userProfile.weight + ' kg' : 'Unknown'}
+Height: ${userProfile.height ? userProfile.height + ' cm' : 'Unknown'}
+Activity Level: ${userProfile.activity_level || 'Unknown'}
+Please tailor your advice directly to this user's specific context.`;
+};
+
 export const chatWithSprout = async (history: ChatMessage[], message: string, userProfile?: UserProfile): Promise<string> => {
     try {
-        const systemMessage = userProfile
-            ? `${SYSTEM_INSTRUCTION}\n\nUSER PROFILE:\nProfession: ${userProfile.profession || 'Unknown'}\nHealth Goal: ${userProfile.goal || 'General Health'}`
-            : SYSTEM_INSTRUCTION;
+        const cached = getCachedResponse('sprout', message);
+        if (cached) return cached;
+
+        const systemMessage = SYSTEM_INSTRUCTION + buildUserProfileContext(userProfile);
 
         const messages: any[] = [
             { role: "system", content: systemMessage },
@@ -145,19 +207,24 @@ export const chatWithSprout = async (history: ChatMessage[], message: string, us
             { role: "user", content: message }
         ];
 
+        console.log("DEBUG: openai BaseURL is ->", openai.baseURL);
         // Enable Tools for Sprout
         const completion = await openai.chat.completions.create({
             messages: messages,
-            model: "gpt-4o-mini",
+            model: "gemini-2.5-flash",
             tools: UNIVERSAL_TOOLS_SCHEMA as any,
             tool_choice: "auto"
         });
 
         const finalResponse = await handleToolCalls(completion, messages);
-        return finalResponse.choices[0].message.content || "I'm a bit tangled up in my vines! Try again?";
-    } catch (error) {
+        const resultText = finalResponse.choices[0].message.content || "I'm a bit tangled up in my vines! Try again?";
+        if (resultText && !resultText.includes("DEBUG ERROR")) {
+            setCachedResponse('sprout', message, resultText);
+        }
+        return resultText;
+    } catch (error: any) {
         console.error("Chat Error:", error);
-        return "Sorry, my systems are acting up. 🤖";
+        return `Sorry, my systems are acting up. 🤖 (DEBUG ERROR: ${error.message})`;
     }
 };
 
@@ -169,10 +236,15 @@ async function searchGymExercises(message: string): Promise<string> {
         const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
 
         // Generate embedding
-        const openai = new OpenAI({ apiKey: import.meta.env.VITE_OPENAI_API_KEY, dangerouslyAllowBrowser: true });
+        const openai = new OpenAI({
+            apiKey: import.meta.env.VITE_OPENAI_API_KEY,
+            baseURL: getGeminiBaseURL(),
+            dangerouslyAllowBrowser: true
+        });
         const embeddingRes = await openai.embeddings.create({
-            model: "text-embedding-3-small",
+            model: "gemini-embedding-001",
             input: message,
+            dimensions: 768,
         });
         const queryEmbedding = embeddingRes.data[0].embedding;
 
@@ -196,29 +268,36 @@ async function searchGymExercises(message: string): Promise<string> {
     }
 }
 
-export const chatWithTrainer = async (history: ChatMessage[], message: string): Promise<string> => {
+export const chatWithTrainer = async (history: ChatMessage[], message: string, userProfile?: UserProfile): Promise<string> => {
     try {
+        const cached = getCachedResponse('trainer', message);
+        if (cached) return cached;
+
         // 1. RAG Search
         const ragContext = await searchGymExercises(message);
 
         const messages: any[] = [
-            { role: "system", content: TRAINER_SYSTEM_INSTRUCTION + ragContext },
+            { role: "system", content: TRAINER_SYSTEM_INSTRUCTION + buildUserProfileContext(userProfile) + ragContext },
             ...history.map(msg => ({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text } as any)).slice(-5),
             { role: "user", content: message }
         ];
 
         const completion = await openai.chat.completions.create({
             messages: messages,
-            model: "gpt-4o-mini",
+            model: "gemini-2.5-flash",
             tools: UNIVERSAL_TOOLS_SCHEMA as any,
             tool_choice: "auto"
         });
 
         const finalResponse = await handleToolCalls(completion, messages);
-        return finalResponse.choices[0].message.content || "Keep moving!";
-    } catch (error) {
+        const resultText = finalResponse.choices[0].message.content || "Keep moving!";
+        if (resultText && !resultText.includes("DEBUG ERROR")) {
+            setCachedResponse('trainer', message, resultText);
+        }
+        return resultText;
+    } catch (error: any) {
         console.error("Trainer Chat Error:", error);
-        return "I'm out of breath! Give me a second.";
+        return `I'm out of breath! Give me a second. (DEBUG ERROR: ${error.message})`;
     }
 };
 
@@ -228,10 +307,15 @@ export const chatWithTrainer = async (history: ChatMessage[], message: string): 
 async function searchNutritionFacts(query: string): Promise<string> {
     try {
         // Generate embedding for query
-        const openai = new OpenAI({ apiKey: import.meta.env.VITE_OPENAI_API_KEY, dangerouslyAllowBrowser: true });
+        const openai = new OpenAI({
+            apiKey: import.meta.env.VITE_OPENAI_API_KEY,
+            baseURL: getGeminiBaseURL(),
+            dangerouslyAllowBrowser: true
+        });
         const embeddingRes = await openai.embeddings.create({
-            model: "text-embedding-3-small",
+            model: "gemini-embedding-001",
             input: query,
+            dimensions: 768,
         });
         const queryEmbedding = embeddingRes.data[0].embedding;
 
@@ -258,14 +342,19 @@ async function searchNutritionFacts(query: string): Promise<string> {
     }
 }
 
-export const chatWithNutritionBot = async (history: ChatMessage[], message: string, imageBase64?: string): Promise<string> => {
+export const chatWithNutritionBot = async (history: ChatMessage[], message: string, imageBase64?: string, userProfile?: UserProfile): Promise<string> => {
     try {
+        if (!imageBase64) {
+            const cached = getCachedResponse('nutrition', message);
+            if (cached) return cached;
+        }
+
         // 1. RAG Search (Hybrid Architecture)
         // Retrieve relevant facts before calling the Fine-Tuned Model
         const ragContext = await searchNutritionFacts(message);
 
         const messages: any[] = [
-            { role: "system", content: NUTRITION_SYSTEM_INSTRUCTION + ragContext }
+            { role: "system", content: NUTRITION_SYSTEM_INSTRUCTION + buildUserProfileContext(userProfile) + ragContext }
         ];
 
         if (imageBase64) {
@@ -290,8 +379,8 @@ export const chatWithNutritionBot = async (history: ChatMessage[], message: stri
             messages.push({ role: "user", content: message });
         }
 
-        // Use the Fine-Tuned Model (Chef Nourish)
-        const model = import.meta.env.VITE_NUTRITION_MODEL || "gpt-3.5-turbo";
+        // Use the Gemini model (Chef Nourish base logic)
+        const model = "gemini-2.5-flash";
 
         const completion = await openai.chat.completions.create({
             messages: messages,
@@ -301,10 +390,14 @@ export const chatWithNutritionBot = async (history: ChatMessage[], message: stri
         });
 
         const finalResponse = await handleToolCalls(completion, messages);
-        return finalResponse.choices[0].message.content || "Looks delicious! 🥗";
-    } catch (error) {
+        const resultText = finalResponse.choices[0].message.content || "Looks delicious! 🥗";
+        if (resultText && !resultText.includes("DEBUG ERROR") && !imageBase64) {
+            setCachedResponse('nutrition', message, resultText);
+        }
+        return resultText;
+    } catch (error: any) {
         console.error("Nutrition Bot Error:", error);
-        return "My oven is overheating! Give me a second. 🍳";
+        return `My oven is overheating! Give me a second. 🍳 (DEBUG ERROR: ${error.message})`;
     }
 };
 
@@ -317,10 +410,15 @@ async function searchMedicalConditions(userMessage: string): Promise<string> {
         const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
 
         // Generate embedding
-        const openai = new OpenAI({ apiKey: import.meta.env.VITE_OPENAI_API_KEY, dangerouslyAllowBrowser: true });
+        const openai = new OpenAI({
+            apiKey: import.meta.env.VITE_OPENAI_API_KEY,
+            baseURL: getGeminiBaseURL(),
+            dangerouslyAllowBrowser: true
+        });
         const embeddingRes = await openai.embeddings.create({
-            model: "text-embedding-3-small",
+            model: "gemini-embedding-001",
             input: userMessage,
+            dimensions: 768,
         });
         const queryEmbedding = embeddingRes.data[0].embedding;
 
@@ -438,7 +536,7 @@ async function handleToolCalls(completion: any, messages: any[]): Promise<any> {
             // Second Call
             const finalCompletion = await openai.chat.completions.create({
                 messages: messages,
-                model: "gpt-4o-mini",
+                model: "gemini-2.5-flash",
             });
             return finalCompletion;
         }
@@ -447,27 +545,34 @@ async function handleToolCalls(completion: any, messages: any[]): Promise<any> {
 }
 
 
-export const chatWithDoctor = async (history: ChatMessage[], message: string): Promise<string> => {
+export const chatWithDoctor = async (history: ChatMessage[], message: string, userProfile?: UserProfile): Promise<string> => {
     try {
+        const cached = getCachedResponse('doctor', message);
+        if (cached) return cached;
+
         const ragContext = await searchMedicalConditions(message);
         const messages: any[] = [
-            { role: "system", content: DOCTOR_SYSTEM_INSTRUCTION + ragContext },
+            { role: "system", content: DOCTOR_SYSTEM_INSTRUCTION + buildUserProfileContext(userProfile) + ragContext },
             ...history.map(msg => ({ role: msg.sender === 'user' ? 'user' : 'assistant', content: msg.text } as any)).slice(-5),
             { role: "user", content: message }
         ];
 
         const completion = await openai.chat.completions.create({
             messages: messages,
-            model: "gpt-4o-mini",
+            model: "gemini-2.5-flash",
             tools: UNIVERSAL_TOOLS_SCHEMA as any,
             tool_choice: "auto"
         });
 
         const finalResponse = await handleToolCalls(completion, messages);
-        return finalResponse.choices[0].message.content || "I'm here to listen. Tell me more.";
-    } catch (error) {
+        const resultText = finalResponse.choices[0].message.content || "I'm here to listen. Tell me more.";
+        if (resultText && !resultText.includes("DEBUG ERROR")) {
+            setCachedResponse('doctor', message, resultText);
+        }
+        return resultText;
+    } catch (error: any) {
         console.error("Doctor Chat Error:", error);
-        return "I'm currently attending to an emergency. One moment.";
+        return `I'm currently attending to an emergency. One moment. (DEBUG ERROR: ${error.message})`;
     }
 };
 
@@ -484,7 +589,7 @@ export const generateTasks = async (score: number, context: string): Promise<Hab
           Each object must have: id (string), title (string), description (string), points (integer), category (string: one of water, exercise, mindfulness, nutrition, sleep).`
                 }
             ],
-            model: "gpt-4o-mini",
+            model: "gemini-2.5-flash",
             response_format: { type: "json_object" }
         });
 
@@ -505,15 +610,17 @@ export class OpenAIClient {
     private client: OpenAI;
 
     constructor(apiKey: string) {
-        this.client = new OpenAI({ apiKey, dangerouslyAllowBrowser: true });
+        this.client = new OpenAI({
+            apiKey,
+            baseURL: getGeminiBaseURL(),
+            dangerouslyAllowBrowser: true
+        });
     }
 
     async chat(botId: string, messages: Message[]): Promise<string> {
         try {
-            // Use fine-tuned model for Chef Nourish (nutrition bot)
-            const model = botId === 'chef-nourish' && import.meta.env.VITE_NUTRITION_MODEL
-                ? import.meta.env.VITE_NUTRITION_MODEL
-                : 'gpt-3.5-turbo';
+            // Use base model for everything now
+            const model = 'gemini-2.5-flash';
 
             const response = await this.client.chat.completions.create({
                 model: model,
@@ -560,7 +667,7 @@ export const verifyTaskCompletion = async (taskTitle: string, imageBase64: strin
                     ]
                 }
             ],
-            model: "gpt-4o-mini",
+            model: "gemini-2.5-flash",
             response_format: { type: "json_object" }
         });
 
@@ -573,27 +680,10 @@ export const verifyTaskCompletion = async (taskTitle: string, imageBase64: strin
 };
 
 export const generateSproutSpeech = async (text: string): Promise<string | undefined> => {
-    try {
-        const mp3 = await openai.audio.speech.create({
-            model: "tts-1",
-            voice: "shimmer",
-            input: text,
-        });
-
-        const buffer = await mp3.arrayBuffer();
-        let binaryString = "";
-        const bytes = new Uint8Array(buffer);
-        // Process in chunks to avoid stack overflow for large files
-        const CHUNK_SIZE = 8192;
-        for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
-            binaryString += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK_SIZE)));
-        }
-        const base64Final = btoa(binaryString);
-        return "data:audio/mp3;base64," + base64Final;
-    } catch (error) {
-        console.error("TTS generation error:", error);
-        return undefined;
-    }
+    // Gemini OpenAI compatible endpoint does not yet support the /audio/speech endpoints.
+    // Disabling for now to prevent crashes.
+    console.warn("Sprout Speech is temporarily disabled due to Gemini migration.");
+    return undefined;
 };
 
 // Fallback functions for Map/Search features (OpenAI doesn't support Google Maps/Search Tools natively)

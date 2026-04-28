@@ -11,9 +11,10 @@ interface NutritionChatProps {
   messages: ChatMessage[];
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   onBack: () => void;
+  userProfile?: import('../types').UserProfile;
 }
 
-const NutritionChat: React.FC<NutritionChatProps> = ({ messages, setMessages, onBack }) => {
+const NutritionChat: React.FC<NutritionChatProps> = ({ messages, setMessages, onBack, userProfile }) => {
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isCameraActive, setIsCameraActive] = useState(false);
@@ -81,16 +82,16 @@ const NutritionChat: React.FC<NutritionChatProps> = ({ messages, setMessages, on
     const textToSend = img ? (inputText.trim() || "Analyze this meal for me.") : inputText;
 
     const userMsg: ChatMessage = { id: Date.now().toString(), sender: 'user', text: textToSend, timestamp: Date.now() };
-    setMessages(prev => [...prev, userMsg]);
+    setMessages(prev => [...prev.slice(-19), userMsg, { id: `nutri-${Date.now()}`, sender: 'bot', senderName: 'Chef Nourish', avatarColor: '#F59E0B', text: '', isTyping: true, timestamp: Date.now() }]);
 
-    setInputText('');
-    setCapturedImage(null);
-    setIsLoading(true);
-
-    const responseText = await chatWithNutritionBot(messages, textToSend, img || undefined);
+    const responseText = await chatWithNutritionBot(messages, textToSend, img || undefined, userProfile);
 
     const botMsg: ChatMessage = { id: (Date.now() + 1).toString(), sender: 'bot', text: responseText, timestamp: Date.now() };
-    setMessages(prev => [...prev, botMsg]);
+
+    setMessages(prev => {
+      const updatedMessages = prev.filter(msg => !msg.isTyping); // Remove the typing indicator
+      return [...updatedMessages, botMsg];
+    });
     setIsLoading(false);
 
     // Save to Supabase

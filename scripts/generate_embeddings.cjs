@@ -35,7 +35,10 @@ const parseEnv = () => {
 
 const env = parseEnv();
 const supabase = createClient(env.VITE_SUPABASE_URL, env.VITE_SUPABASE_ANON_KEY);
-const openai = new OpenAI({ apiKey: env.VITE_OPENAI_API_KEY });
+const openai = new OpenAI({
+    apiKey: env.VITE_OPENAI_API_KEY,
+    baseURL: "https://generativelanguage.googleapis.com/v1beta/openai/"
+});
 
 // --- 2. Helper: Retry Logic ---
 async function withRetry(fn, retries = 3, delay = 1000) {
@@ -107,8 +110,9 @@ async function generateEmbeddings(table, textColumn, extraColumn = null, isArray
             await withRetry(async () => {
                 // OpenAI Call
                 const response = await openai.embeddings.create({
-                    model: "text-embedding-3-small",
+                    model: "gemini-embedding-001",
                     input: text,
+                    dimensions: 768,
                 });
                 const embedding = response.data[0].embedding;
 

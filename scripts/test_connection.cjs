@@ -16,7 +16,7 @@ function testUrl(url) {
 
 async function run() {
     await testUrl('https://www.google.com');
-    await testUrl('https://api.openai.com');
+    await testUrl('https://generativelanguage.googleapis.com/v1beta/openai/models');
     await testUrl('https://supabase.com');
 }
 

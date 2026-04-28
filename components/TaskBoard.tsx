@@ -10,6 +10,12 @@ interface TaskBoardProps {
   currentScore: number;
   streak: number;
   setGameState: React.Dispatch<React.SetStateAction<GameState>>;
+  userProfile?: import('../types').UserProfile;
+  glassesConsumed: number;
+  totalGlasses: number;
+  onDrinkGlass: (skipCooldown?: boolean) => void;
+  lastGlassTime: number;
+  glassCooldownMs: number;
 }
 
 // Audio Utilities for Sprout Speech
@@ -25,10 +31,27 @@ function decodeBase64ToUint8Array(base64: string) {
 
 
 
-const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, setTasks, onTaskComplete, currentScore, streak, setGameState }) => {
+const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, setTasks, onTaskComplete, currentScore, streak, setGameState, userProfile, glassesConsumed, totalGlasses, onDrinkGlass, lastGlassTime, glassCooldownMs }) => {
   const [isGenerating, setIsGenerating] = useState(false);
   const [verifyingTask, setVerifyingTask] = useState<HabitTask | null>(null);
   const [isCameraActive, setIsCameraActive] = useState(false);
+  // Hydration verification state
+  const [hydrationCameraActive, setHydrationCameraActive] = useState(false);
+  const [hydrationMilestone, setHydrationMilestone] = useState<'half' | 'full' | null>(null);
+  const [cooldownSecsLeft, setCooldownSecsLeft] = useState(0);
+
+  // Live countdown for glass cooldown
+  useEffect(() => {
+    const tick = () => {
+      const elapsed = Date.now() - lastGlassTime;
+      const remaining = Math.max(0, Math.ceil((glassCooldownMs - elapsed) / 1000));
+      setCooldownSecsLeft(remaining);
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [lastGlassTime, glassCooldownMs]);
+
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verificationFeedback, setVerificationFeedback] = useState<string | null>(null);
@@ -289,7 +312,7 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, setTasks, onTaskComplete, 
       { id: '1', sender: 'bot', text: `Tell me more about this: ${verifyingTask.title}`, timestamp: Date.now() }
     ];
 
-    const response = await chatWithSprout(history, `I completed the task "${verifyingTask.title}". Here is what I did: ${reflectInput}. Please give me a warm, supportive response and grant me the points!`);
+    const response = await chatWithSprout(history, `I completed the task "${verifyingTask.title}". Here is what I did: ${reflectInput}. Please give me a warm, supportive response and grant me the points!`, userProfile);
 
     setSproutReply(response);
     setIsVerifying(false);
@@ -444,6 +467,165 @@ const TaskBoard: React.FC<TaskBoardProps> = ({ tasks, setTasks, onTaskComplete, 
 
       <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin">
         {tasks.filter(t => !t.completed).map((task) => {
+          // ── Special Hydration Hero Card ──
+          if (task.category === 'water') {
+            const pct = Math.round((glassesConsumed / totalGlasses) * 100);
+            const halfPoint = Math.floor(totalGlasses / 2);
+            const isMilestone = glassesConsumed === halfPoint || glassesConsumed === totalGlasses - 1;
+            const isOnCooldown = cooldownSecsLeft > 0 && glassesConsumed > 0;
+            const cooldownMins = Math.floor(cooldownSecsLeft / 60);
+            const cooldownSecs = cooldownSecsLeft % 60;
+            const timeSlots = [
+              { label: '🌅 Morning', range: '7–10 AM', glasses: Math.ceil(totalGlasses * 0.2) },
+              { label: '☀️ Midday', range: '10 AM–1 PM', glasses: Math.ceil(totalGlasses * 0.25) },
+              { label: '🌞 Afternoon', range: '1–5 PM', glasses: Math.ceil(totalGlasses * 0.3) },
+              { label: '🌙 Evening', range: '5–10 PM', glasses: Math.ceil(totalGlasses * 0.25) },
+            ];
+            return (
+              <React.Fragment key={task.id}>
+                {/* Hydration Camera Modal */}
+                {hydrationCameraActive && (
+                  <div className="fixed inset-0 z-[200] bg-black/90 flex flex-col items-center justify-center p-4">
+                    <div className="w-full max-w-sm bg-stone-900 border-2 border-blue-600 rounded-2xl overflow-hidden shadow-2xl">
+                      <div className="p-4 border-b border-stone-700 flex items-center gap-2">
+                        <Droplets className="text-blue-400" size={20} />
+                        <div>
+                          <h3 className="font-bold text-stone-200 text-sm">
+                            {hydrationMilestone === 'half' ? '📸 Halfway Check! (50%)' : '📸 Final Verification! (100%)'}
+                          </h3>
+                          <p className="text-stone-500 text-xs">Show your water glass or bottle to verify</p>
+                        </div>
+                      </div>
+                      <div className="p-4 flex flex-col gap-3">
+                        <p className="text-stone-400 text-xs text-center">Take a photo of your glass/water bottle to confirm you drank water 💧</p>
+                        <button
+                          onClick={() => {
+                            // Confirm and log the glass
+                            onDrinkGlass(true);
+                            setHydrationCameraActive(false);
+                            setHydrationMilestone(null);
+                          }}
+                          className="w-full py-3 bg-blue-700 hover:bg-blue-600 text-white font-bold rounded-xl flex items-center justify-center gap-2"
+                        >
+                          <Camera size={18} /> Confirm — I drank water! ✅
+                        </button>
+                        <button
+                          onClick={() => { setHydrationCameraActive(false); setHydrationMilestone(null); }}
+                          className="w-full py-2 text-stone-500 text-sm hover:text-stone-300"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                <div className="bg-stone-900 border-2 border-blue-600 p-4 rounded-xl shadow-lg">
+                  {/* Header */}
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="flex items-center gap-2">
+                      <div className="p-1.5 bg-blue-900 rounded-lg border border-blue-700">
+                        <Droplets className="text-blue-400" size={20} />
+                      </div>
+                      <div>
+                        <h3 className="text-base font-bold text-stone-200 leading-none">Hydration Hero 💧</h3>
+                        <p className="text-stone-500 text-xs mt-0.5">{task.description}</p>
+                      </div>
+                    </div>
+                    <span className="text-yellow-500 font-bold text-lg font-mono">+{task.points}</span>
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="mb-3">
+                    <div className="flex justify-between text-xs text-stone-400 mb-1">
+                      <span>{glassesConsumed}/{totalGlasses} glasses</span>
+                      <span className="font-bold text-blue-400">{pct}%</span>
+                    </div>
+                    <div className="w-full bg-stone-700 rounded-full h-3 overflow-hidden">
+                      <div
+                        className="h-3 rounded-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all duration-500"
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+                    {/* Milestone markers */}
+                    <div className="flex justify-between text-[9px] text-stone-600 mt-0.5 px-0.5">
+                      <span>0%</span>
+                      <span className="text-yellow-600">📸 50%</span>
+                      <span className="text-yellow-500">📸🏆 100%</span>
+                    </div>
+                  </div>
+
+                  {/* Glass icons grid */}
+                  <div className="flex flex-wrap gap-1.5 mb-4">
+                    {Array.from({ length: totalGlasses }).map((_, i) => (
+                      <span key={i} className={`text-lg transition-all ${i < glassesConsumed ? 'opacity-100' : i === glassesConsumed ? 'opacity-50 animate-pulse' : 'opacity-15'
+                        }`}>
+                        {i < glassesConsumed ? '🥛' : '🫙'}
+                      </span>
+                    ))}
+                  </div>
+
+                  {/* Cooldown info */}
+                  {isOnCooldown && (
+                    <div className="mb-2 flex items-center gap-2 bg-stone-800 rounded-lg px-3 py-2 border border-stone-700">
+                      <span className="text-yellow-400 text-sm">⏱️</span>
+                      <span className="text-xs text-stone-400">
+                        Next glass available in <span className="text-yellow-400 font-bold">
+                          {cooldownMins}:{String(cooldownSecs).padStart(2, '0')}
+                        </span>
+                      </span>
+                    </div>
+                  )}
+
+                  {/* Drink button */}
+                  {glassesConsumed < totalGlasses ? (
+                    <button
+                      disabled={isOnCooldown}
+                      onClick={() => {
+                        if (isOnCooldown) return;
+                        if (isMilestone) {
+                          setHydrationMilestone(glassesConsumed === halfPoint ? 'half' : 'full');
+                          setHydrationCameraActive(true);
+                        } else {
+                          onDrinkGlass(false);
+                        }
+                      }}
+                      className={`w-full py-2.5 font-bold text-sm rounded-xl border-b-4 transition-all flex items-center justify-center gap-2 ${isOnCooldown
+                          ? 'bg-stone-700 border-stone-800 text-stone-500 cursor-not-allowed'
+                          : isMilestone
+                            ? 'bg-yellow-700 hover:bg-yellow-600 border-yellow-900 text-white active:border-b-0 active:scale-95'
+                            : 'bg-blue-700 hover:bg-blue-600 border-blue-900 text-white active:border-b-0 active:scale-95'
+                        }`}
+                    >
+                      {isOnCooldown ? (
+                        <><span>⏳</span> Wait {cooldownMins}:{String(cooldownSecs).padStart(2, '0')}</>
+                      ) : isMilestone ? (
+                        <><Camera size={16} /> Verify & Drink Glass ({glassesConsumed + 1}/{totalGlasses}) 📸</>
+                      ) : (
+                        <><Droplets size={16} /> Drink a Glass ({glassesConsumed + 1}/{totalGlasses})</>
+                      )}
+                    </button>
+                  ) : (
+                    <div className="w-full py-2.5 bg-emerald-800 text-emerald-300 font-bold text-sm rounded-xl text-center">
+                      ✅ All glasses done! Coins incoming…
+                    </div>
+                  )}
+
+                  {/* Time slots */}
+                  <div className="mt-3 grid grid-cols-2 gap-2">
+                    {timeSlots.map(slot => (
+                      <div key={slot.label} className="bg-stone-800 rounded-lg p-2 border border-stone-700">
+                        <p className="text-[10px] font-black text-stone-400 uppercase tracking-wide">{slot.label}</p>
+                        <p className="text-xs text-stone-300">{slot.range}</p>
+                        <p className="text-blue-400 text-xs font-bold">{slot.glasses} glasses</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </React.Fragment>
+            );
+          }
+
           const isZenTask = task.title.includes("Zen Garden Breathing");
           const isMeditationTask = task.title.includes("Mindfulness & Meditation");
           const isReflectTask = !isMeditationTask && (

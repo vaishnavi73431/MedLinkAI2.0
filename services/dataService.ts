@@ -60,6 +60,7 @@ export const dataService = {
     async updateProfile(userId: string, updates: Partial<UserProfile>) {
         const { data, error } = await supabase
             .from('profiles')
+            // Using spreading allows physiological fields (weight, height, etc.) to flow through automatically
             .update({ ...updates, updated_at: new Date().toISOString() })
             .eq('id', userId)
             .select()

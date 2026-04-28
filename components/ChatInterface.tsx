@@ -8,9 +8,9 @@ import { authService } from '../services/authService';
 
 interface ChatInterfaceProps {
   messages: ChatMessage[];
-  setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   gameState: GameState;
   setGameState: React.Dispatch<React.SetStateAction<GameState>>;
+  userProfile?: import('../types').UserProfile;
 }
 
 function decodeBase64ToUint8Array(base64: string) {
@@ -25,7 +25,7 @@ function decodeBase64ToUint8Array(base64: string) {
 
 
 
-const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, setMessages, gameState, setGameState }) => {
+const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, setMessages, gameState, setGameState, userProfile }) => {
   const [inputText, setInputText] = useState('');
   const [interimText, setInterimText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -33,7 +33,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, setMessages, ga
   const [isListening, setIsListening] = useState(false);
   const [speechError, setSpeechError] = useState<string | null>(null);
   const [lastScheduledTask, setLastScheduledTask] = useState<string | null>(null);
-  const [permStatus, setPermStatus] = useState<NotificationPermission>(Notification.permission);
+  const [permStatus, setPermStatus] = useState<NotificationPermission>(typeof Notification !== 'undefined' ? Notification.permission : 'denied');
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const recognitionRef = useRef<any>(null);
@@ -48,6 +48,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, setMessages, ga
 
   // Keep track of permission state
   useEffect(() => {
+    if (typeof Notification === 'undefined') return;
     const interval = setInterval(() => {
       if (Notification.permission !== permStatus) {
         setPermStatus(Notification.permission);
@@ -57,6 +58,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, setMessages, ga
   }, [permStatus]);
 
   const requestNotificationPermission = async () => {
+    if (typeof Notification === 'undefined') return;
     const permission = await Notification.requestPermission();
     setPermStatus(permission);
     if (permission === 'granted') {
@@ -158,7 +160,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, setMessages, ga
     setMessages(prev => [...prev, userMsg]);
     setIsLoading(true);
 
-    const responseText = await chatWithSprout(messages, "I want to plan my day. Ask me for my schedule. Remind me to give you exact times (e.g. 9:40pm) for my alerts.");
+    const responseText = await chatWithSprout(messages, "I want to plan my day. Ask me for my schedule. Remind me to give you exact times (e.g. 9:40pm) for my alerts.", userProfile);
 
     const botMsg: ChatMessage = {
       id: (Date.now() + 1).toString(),
@@ -201,15 +203,9 @@ const ChatInterface: React.FC<ChatInterfaceProps> = ({ messages, setMessages, ga
     setInterimText('');
     setIsLoading(true);
 
-    // Fetch User Profile for Context
     const { session } = await authService.getSession();
-    let userProfile;
-    if (session?.user) {
-      const { data } = await dataService.getProfile(session.user.id);
-      userProfile = data;
-    }
 
-    const responseText = await chatWithSprout(messages, textToSubmit, userProfile || undefined);
+    const responseText = await chatWithSprout(messages, textToSubmit, userProfile);
 
     const timeRegex = /(\d{1,2}(?::\d{2})?\s*(am|pm|AM|PM))|(\d{1,2}:\d{2})/;
     const timeMatch = textToSubmit.match(timeRegex);

@@ -93,6 +93,10 @@ export interface UserProfile {
   last_completed_date?: string;
   goal?: string;
   profession?: string;
+  dob?: string;
+  weight?: number;
+  height?: number;
+  activity_level?: 'Sedentary' | 'Active' | 'Athlete' | string;
   updated_at?: string;
 }
 

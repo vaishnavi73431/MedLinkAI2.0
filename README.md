@@ -63,16 +63,22 @@ How we turn health into revenue:
 ### Installation
 1. Clone the repository:
    ```bash
-   git clone https://github.com/StartYourHabit/StartYourHabit.git
+   git clone https://github.com/vaishnavi73431/MedLinkAI2.0.git
    ```
 2. Install dependencies:
    ```bash
    npm install
    ```
 3. Set up environment variables:
-   Create a `.env` file in the root directory and add your OpenAI API key:
+   Create a `.env` file in the root directory and add your Gemini API key and Supabase credentials:
    ```env
-   VITE_OPENAI_API_KEY=your_api_key_here
+   VITE_OPENAI_API_KEY=your_gemini_api_key_here
+   VITE_GEMINI_API_KEY=your_gemini_api_key_here
+   OPENAI_API_KEY=your_gemini_api_key_here
+   GEMINI_API_KEY=your_gemini_api_key_here
+   
+   VITE_SUPABASE_URL=your_supabase_url_here
+   VITE_SUPABASE_ANON_KEY=your_supabase_anon_key_here
    ```
 4. Run the development server:
    ```bash

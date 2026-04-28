@@ -14,7 +14,10 @@ env_path = Path(__file__).parent.parent / '.env'
 load_dotenv(env_path)
 
 # Initialize OpenAI client
-client = OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
+client = OpenAI(
+    api_key=os.getenv('OPENAI_API_KEY'),
+    base_url="https://generativelanguage.googleapis.com/v1beta/openai/"
+)
 
 # Nutrition topics to cover
 TOPICS = [
@@ -48,7 +51,7 @@ def generate_qa_pairs(topic, num_pairs=5):
     """
     
     response = client.chat.completions.create(
-        model="gpt-4o-mini",  # Changed from gpt-4
+        model="gemini-2.5-flash",  # Changed from gpt-4o-mini
         messages=[
             {"role": "system", "content": "You are creating training data for a nutrition chatbot named Chef Nourish."},
             {"role": "user", "content": prompt}

@@ -117,38 +117,20 @@ def main():
     """Main training pipeline"""
     
     print("="*60)
-    print("Chef Nourish Fine-tuning Pipeline")
+    print("Chef Nourish Fine-tuning Pipeline (Gemini Migration)")
     print("="*60)
     
-    # Check for training file
-    training_file = "nutrition_training.jsonl"
+    print("\n⚠️  IMPORTANT NOTICE ⚠️")
+    print("This project has been migrated to use the Google Gemini API.")
+    print("The OpenAI-compatible endpoint provided by Gemini does NOT support")
+    print("API-based fine-tuning via the `/fine_tuning` endpoints.")
+    print("\nIf you want to fine-tune a Gemini model using the generated dataset,")
+    print("please visit the Google AI Studio (https://aistudio.google.com/),")
+    print("upload your `nutrition_training.jsonl` file, and create a Tuned Model.")
+    print("\nOnce tuned, you can use your new model's name in your `.env` file.")
+    print("For now, the app defaults to the base `gemini-2.5-flash` model,")
+    print("which operates well using the RAG database alone.")
+    print("="*60)
     
-    if not os.path.exists(training_file):
-        print(f"\n✗ Training file not found: {training_file}")
-        print("Run 'python generate_nutrition_data.py' first!")
-        return
-    
-    # Step 1: Upload training file
-    file_id = upload_training_file(training_file)
-    
-    # Step 2: Start fine-tuning
-    job_id = start_fine_tuning(file_id)
-    
-    # Step 3: Monitor progress
-    model_id = monitor_fine_tuning(job_id)
-    
-    if model_id:
-        # Step 4: Test the model
-        test_model(model_id)
-        
-        print("\n" + "="*60)
-        print("✓ Training Complete!")
-        print("="*60)
-        print(f"\nYour fine-tuned model ID: {model_id}")
-        print("\nNext steps:")
-        print("1. Update your .env file with the model ID")
-        print("2. Update NutritionChat.tsx to use the fine-tuned model")
-        print("3. Test in your app!")
-
 if __name__ == "__main__":
     main()

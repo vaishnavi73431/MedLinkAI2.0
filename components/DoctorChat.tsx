@@ -10,9 +10,10 @@ interface DoctorChatProps {
   messages: ChatMessage[];
   setMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
   onBack: () => void;
+  userProfile?: import('../types').UserProfile;
 }
 
-const DoctorChat: React.FC<DoctorChatProps> = ({ messages, setMessages, onBack }) => {
+const DoctorChat: React.FC<DoctorChatProps> = ({ messages, setMessages, onBack, userProfile }) => {
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -34,7 +35,7 @@ const DoctorChat: React.FC<DoctorChatProps> = ({ messages, setMessages, onBack }
     setInputText('');
     setIsLoading(true);
 
-    const responseText = await chatWithDoctor(messages, currentInput);
+    const responseText = await chatWithDoctor(messages, currentInput, userProfile);
 
     const botMsg: ChatMessage = { id: (Date.now() + 1).toString(), sender: 'bot', text: responseText, timestamp: Date.now() };
     setMessages(prev => [...prev, botMsg]);
